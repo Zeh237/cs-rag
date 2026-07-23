@@ -1,0 +1,8 @@
+/csc_library
+.venv
+
+.env
+.vscode
+*.pyc
+.DS_Store
+.idea
