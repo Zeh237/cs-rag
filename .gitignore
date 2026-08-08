@@ -9,3 +9,6 @@ __pycache__/
 *.pyc
 *.db
 /csc_notes
+/eval/.cache/
+/eval/results_*.csv
+/eval/*.cache.json

@@ -167,6 +167,24 @@ python -m pytest
 
 The tests use a temporary database and a temporary notes directory. The tests do not need a running Elasticsearch or Redis instance.
 
+## Retrieval evaluation
+
+Two scripts build and run retrieval evaluations. The setup uses the notes chunked in the `csc_notes` index.
+
+First build a synthetic question dataset. The script picks representative chunks and, when a local LLM server is available, asks the LLM to write a question answerable from each chunk (the answer chunk is the ground truth). If the LLM is unavailable, it uses heuristic templates. Neighboring chunks of the same source are also marked relevant:
+
+```bash
+python scripts/build_eval_dataset.py --out eval/dataset.jsonl --count 120 --seed 42
+```
+
+Then run the four retrieval pipelines (keyword, semantic, hybrid, hybrid + rerank) over the dataset and compare them:
+
+```bash
+python scripts/evaluate_retrieval.py --dataset eval/dataset.jsonl --quick 0
+```
+
+Use `--quick N` to run a sanity check on the first `N` queries, and `--include-neighbors` to switch between judging against the answer chunk only or the answer chunk plus its neighbors. The script prints metrics (`map`, `mrr`, `p@k`, `ndcg@k`, `r@k`), Per-query bootstrap-resampled 95% confidence intervals for the difference against the best method, and per-query results in `eval/results_queries.csv`.
+
 ## Directory layout
 
 ```
@@ -175,6 +193,7 @@ app/services/       Business logic (search, RAG, PDF, embeddings, auth)
 app/db/             Database models and session
 app/static/         Web interface
 scripts/            Notes fetching, indexing, and paper download
+eval/               Synthetic retrieval datasets and evaluation results
 tests/              Automatic tests
 csc_notes/          The notes and their manifest
 csc_library/        The papers and their manifest
