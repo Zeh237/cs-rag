@@ -1,8 +1,11 @@
 /csc_library
 .venv
-
 .env
 .vscode
-*.pyc
-.DS_Store
 .idea
+.DS_Store
+
+__pycache__/
+*.pyc
+*.db
+/csc_notes

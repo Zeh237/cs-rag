@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS Notes Study Assistant</title>
+    <meta name="description" content="Retrieval-Augmented Generation over undergraduate computer science course notes — CS Notes Study Assistant">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <style>
+        .app { max-width: none; width: 100%; height: 100vh; padding: 0; margin: 0; }
+        .header { padding: 14px 20px; margin-bottom: 0; }
+        .tabs { margin: 12px 20px 0; }
+        .main { display: flex; flex-direction: column; min-height: 0; }
+        .card { max-width: 900px; margin: 20px auto; }
+        #query-tab.active { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+        .chat-layout { flex: 1; min-height: 0; height: auto; border: none; border-radius: 0; box-shadow: none; }
+        .footer { display: none; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════ AUTH OVERLAY -->
+<div class="auth-overlay" id="authOverlay">
+    <div class="auth-card" id="authCard">
+
+        <!-- Logo -->
+        <div class="auth-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+            <span>CS Notes</span>
+        </div>
+
+        <!-- Login panel -->
+        <div class="auth-panel" id="loginPanel">
+            <h1 class="auth-title">Welcome back</h1>
+            <p class="auth-subtitle">Sign in to continue studying your CS notes</p>
+
+            <form class="auth-form" id="loginForm" novalidate>
+                <div class="auth-field">
+                    <label for="loginUsername">Username</label>
+                    <input type="text" id="loginUsername" placeholder="your_username" autocomplete="username" required>
+                </div>
+                <div class="auth-field">
+                    <label for="loginPassword">Password</label>
+                    <div class="auth-pass-wrapper">
+                        <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password" required>
+                        <button type="button" class="auth-eye-btn" data-target="loginPassword" aria-label="Toggle password visibility">
+                            <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <svg class="eye-off-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="auth-error hidden" id="loginError"></div>
+                <button type="submit" class="auth-submit-btn" id="loginBtn">
+                    <span class="auth-btn-label">Sign In</span>
+                    <span class="auth-btn-spinner hidden"></span>
+                </button>
+            </form>
+
+            <p class="auth-switch">Don't have an account? <button class="auth-link-btn" id="goToSignup">Create one</button></p>
+        </div>
+
+        <!-- Signup panel -->
+        <div class="auth-panel hidden" id="signupPanel">
+            <h1 class="auth-title">Create account</h1>
+            <p class="auth-subtitle">Join to start querying your CS course notes</p>
+
+            <form class="auth-form" id="signupForm" novalidate>
+                <div class="auth-field">
+                    <label for="signupUsername">Username</label>
+                    <input type="text" id="signupUsername" placeholder="choose_a_username" autocomplete="username" required>
+                </div>
+                <div class="auth-field">
+                    <label for="signupPassword">Password</label>
+                    <div class="auth-pass-wrapper">
+                        <input type="password" id="signupPassword" placeholder="••••••••" autocomplete="new-password" required>
+                        <button type="button" class="auth-eye-btn" data-target="signupPassword" aria-label="Toggle password visibility">
+                            <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <svg class="eye-off-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="auth-error hidden" id="signupError"></div>
+                <button type="submit" class="auth-submit-btn" id="signupBtn">
+                    <span class="auth-btn-label">Create Account</span>
+                    <span class="auth-btn-spinner hidden"></span>
+                </button>
+            </form>
+
+            <p class="auth-switch">Already have an account? <button class="auth-link-btn" id="goToLogin">Sign in</button></p>
+        </div>
+
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ MAIN APP -->
+<div class="app hidden" id="appShell">
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                </svg>
+                <span>CS Notes</span>
+            </div>
+            <p class="tagline">Undergraduate CS Study Assistant — Q&amp;A over your course notes</p>
+        </div>
+
+        <div class="header-right">
+            <div class="health-indicator" id="healthIndicator">
+                <span class="dot"></span>
+                <span>Checking...</span>
+            </div>
+            <div class="user-pill" id="userPill">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span id="userPillName">—</span>
+                <button class="logout-btn" id="logoutBtn" title="Sign out">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab-btn active" data-tab="ingest" id="tabIngest">📄 Ingest</button>
+        <button class="tab-btn" data-tab="search" id="tabSearch">🔍 Search</button>
+        <button class="tab-btn" data-tab="query" id="tabQuery">💬 Chat</button>
+    </nav>
+
+    <main class="main">
+        <!-- ── Ingest ───────────────────────────────────────────────── -->
+        <section id="ingest-tab" class="tab-content active">
+            <div class="card">
+                <h2>Upload Documents</h2>
+                <p class="card-desc">Upload a PDF to index it for study queries. Fill in the metadata fields below.</p>
+
+                <div class="drop-zone" id="dropZone">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <p>Drag &amp; drop a PDF here, or click to browse</p>
+                    <span class="hint">PDF only (Max 50MB)</span>
+                    <input type="file" id="fileInput" accept=".pdf" hidden>
+                </div>
+
+                <div class="file-list" id="fileList"></div>
+
+                <div class="ingest-meta">
+                    <div class="meta-field">
+                        <label for="ingestTitle">Title <span class="required">*</span></label>
+                        <input type="text" id="ingestTitle" placeholder="e.g. Attention Is All You Need">
+                    </div>
+                    <div class="meta-field">
+                        <label for="ingestAuthors">Authors <span class="required">*</span></label>
+                        <input type="text" id="ingestAuthors" placeholder="e.g. Vaswani, Shazeer, Parmar">
+                    </div>
+                    <div class="meta-field">
+                        <label for="ingestCategory">Primary Category <span class="required">*</span></label>
+                        <input type="text" id="ingestCategory" placeholder="e.g. cs.AI">
+                    </div>
+                    <div class="meta-field">
+                        <label for="ingestAllCategories">All Categories <span class="optional">(optional, comma-separated)</span></label>
+                        <input type="text" id="ingestAllCategories" placeholder="e.g. cs.AI, cs.LG, stat.ML">
+                    </div>
+                    <div class="meta-field">
+                        <label for="ingestUrl">Paper URL <span class="optional">(optional)</span></label>
+                        <input type="url" id="ingestUrl" placeholder="e.g. https://arxiv.org/abs/1706.03762">
+                    </div>
+                </div>
+
+                <div class="ingest-progress hidden" id="ingestProgress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <span class="progress-text" id="progressText">Uploading...</span>
+                </div>
+
+                <div class="card-actions">
+                    <button class="btn btn-primary" id="ingestBtn" disabled>
+                        <span>Ingest Document</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="result hidden" id="ingestResult"></div>
+            </div>
+        </section>
+
+        <!-- ── Search ──────────────────────────────────────────────── -->
+        <section id="search-tab" class="tab-content">
+            <div class="card">
+                <h2>Search Notes</h2>
+                <p class="card-desc">Search your indexed CS notes using keyword or semantic search</p>
+
+                <div class="search-options">
+                    <label class="search-mode">
+                        <input type="radio" name="searchMode" value="keyword" checked>
+                        <span>Keyword (BM25)</span>
+                    </label>
+                    <label class="search-mode">
+                        <input type="radio" name="searchMode" value="semantic">
+                        <span>Semantic (Vector)</span>
+                    </label>
+                    <label class="search-mode">
+                        <input type="radio" name="searchMode" value="hybrid">
+                        <span>Hybrid</span>
+                    </label>
+                </div>
+
+                <div class="search-input-group">
+                    <input type="text" id="searchInput" placeholder="Enter search query...">
+                    <button class="btn btn-primary" id="searchBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                        Search
+                    </button>
+                </div>
+
+                <div class="search-results" id="searchResults"></div>
+            </div>
+        </section>
+
+        <!-- ── Chat (Query) ────────────────────────────────────────── -->
+        <section id="query-tab" class="tab-content">
+            <div class="chat-layout">
+
+                <!-- Sidebar: chat list -->
+                <aside class="chat-sidebar" id="chatSidebar">
+                    <div class="chat-sidebar-header">
+                        <span class="chat-sidebar-title">Chats</span>
+                        <button class="new-chat-btn" id="newChatBtn" title="New chat">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="chat-list" id="chatList">
+                        <p class="chat-list-empty">No chats yet.<br>Click + to start one.</p>
+                    </div>
+                </aside>
+
+                <!-- Main chat area -->
+                <div class="chat-container" id="chatContainer">
+
+                    <!-- No chat selected -->
+                    <div class="chat-no-selection" id="chatNoSelection">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <p>Select a chat or create a new one to get started.</p>
+                        <button class="btn btn-primary" id="newChatBtnAlt">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            New Chat
+                        </button>
+                    </div>
+
+                    <!-- Active chat -->
+                    <div class="chat-active hidden" id="chatActive">
+                        <div class="chat-header">
+                            <div class="chat-header-left">
+                                <h2 class="chat-title-label" id="chatTitleLabel">Chat</h2>
+                            </div>
+                            <div class="chat-header-right">
+                                <button class="chat-delete-btn" id="deleteChatBtn" title="Delete chat">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="chat-messages" id="chatMessages">
+                            <div class="chat-welcome" id="chatWelcome">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40">
+                                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                                    <line x1="12" y1="22.08" x2="12" y2="12"/>
+                                </svg>
+                                <p>Ask me anything about your CS notes.</p>
+                            </div>
+                        </div>
+
+                        <div class="chat-input-area">
+                            <div class="chat-input-wrapper">
+                                <textarea id="questionInput" placeholder="Ask a question about your CS notes..." rows="1"></textarea>
+                                <button class="chat-send-btn" id="queryBtn" disabled aria-label="Send message">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <line x1="22" y1="2" x2="11" y2="13"/>
+                                        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <p>CS Notes Study Assistant — Built with FastAPI &amp; Elasticsearch</p>
+    </footer>
+</div>
+
+<!-- New Chat Modal -->
+<div class="modal-backdrop hidden" id="newChatModal">
+    <div class="modal-card">
+        <h3>New Chat</h3>
+        <div class="auth-field" style="margin-top:16px;">
+            <label for="newChatTitle">Chat title</label>
+            <input type="text" id="newChatTitle" placeholder="e.g. How do hash tables work?" maxlength="120">
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" id="cancelNewChat">Cancel</button>
+            <button class="btn btn-primary" id="confirmNewChat">Create</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
