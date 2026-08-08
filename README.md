@@ -185,6 +185,36 @@ python scripts/evaluate_retrieval.py --dataset eval/dataset.jsonl --quick 0
 
 Use `--quick N` to run a sanity check on the first `N` queries, and `--include-neighbors` to switch between judging against the answer chunk only or the answer chunk plus its neighbors. The script prints metrics (`map`, `mrr`, `p@k`, `ndcg@k`, `r@k`), Per-query bootstrap-resampled 95% confidence intervals for the difference against the best method, and per-query results in `eval/results_queries.csv`.
 
+## Chunking-strategy evaluation
+
+Fixed-size, sentence-bundled, and paragraph-style chunking are compared on the same notes corpus. The corpus is parsed once into a shared word-index coordinate system (`app/services/chunking.py`); every chunk stores the word span it covers and the question dataset stores the gold-answer span, so the same questions are evaluated against every strategy without re-annotating. Questions are LLM-generated per paragraph (heuristic fallback when no LLM runs).
+
+1. Build the chunking-agnostic question set:
+
+   ```bash
+   python scripts/build_chunk_eval_dataset.py --notes-dir ./csc_notes \
+       --out eval/chunk_dataset.jsonl --count 100 --seed 42
+   ```
+
+2. Index the same notes under the strategies (the current production chunker is `--strategy fixed --chunk-size 1000 --overlap 200`):
+
+   ```bash
+   python scripts/index_library.py --index csc_notes_fixed1000    --strategy fixed --chunk-size 1000 --overlap 200 --only-md
+   python scripts/index_library.py --index csc_notes_fixed300      --strategy fixed --chunk-size 300 --overlap 45 --only-md
+   python scripts/index_library.py --index csc_notes_sentence300   --strategy sentence --chunk-size 300 --overlap 45 --only-md
+   python scripts/index_library.py --index csc_notes_para          --strategy paragraph --chunk-size 300 --overlap 0 --only-md
+   ```
+
+3. Evaluate (add `--grade N` to run the LLM end-to-end answer pipeline on a sample and have a local LLM judge score each answer /5):
+
+   ```bash
+   python scripts/evaluate_chunking.py \
+       --indexes csc_notes_fixed1000,csc_notes_fixed300,csc_notes_sentence300,csc_notes_para \
+       --dataset eval/chunk_dataset.jsonl --overlap-ratio 0.5 --grade 4
+   ```
+
+A retrieved chunk is judged relevant when its span overlaps at least `--overlap-ratio` of the gold paragraph. The report also prints the "single-chunk containment" share — how often a whole paragraph fits in one chunk per strategy — which is the structural limit on answer quality.
+
 ## Directory layout
 
 ```

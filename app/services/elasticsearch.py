@@ -19,6 +19,9 @@ _INDEX_MAPPING = {
             "source_url": {"type": "keyword"},
             "local_pdf": {"type": "boolean"},
             "vector_embedding": {"type": "dense_vector", "dims": 384, "index": True, "similarity": "cosine"},
+            "span_start": {"type": "integer"},
+            "span_end": {"type": "integer"},
+            "strategy": {"type": "keyword"},
         }
     }
 }
@@ -42,25 +45,28 @@ class ElasticsearchService:
         except Exception:
             return False
 
-    def create_index_if_not_exists(self) -> None:
-        if not self.client.indices.exists(index=settings.INDEX_NAME):
-            self.client.indices.create(index=settings.INDEX_NAME, body=_INDEX_MAPPING)
+    def create_index_if_not_exists(self, index: str | None = None) -> None:
+        index = index or settings.INDEX_NAME
+        if not self.client.indices.exists(index=index):
+            self.client.indices.create(index=index, body=_INDEX_MAPPING)
 
-    def index_chunk(self, chunk_id: str, document: dict) -> None:
-        self.client.index(index=settings.INDEX_NAME, id=chunk_id, document=document)
+    def index_chunk(self, chunk_id: str, document: dict, index: str | None = None) -> None:
+        self.client.index(index=index or settings.INDEX_NAME, id=chunk_id, document=document)
 
-    def refresh_index(self) -> None:
-        self.client.indices.refresh(index=settings.INDEX_NAME)
+    def refresh_index(self, index: str | None = None) -> None:
+        self.client.indices.refresh(index=index or settings.INDEX_NAME)
 
-    def delete_index(self) -> None:
-        if self.client.indices.exists(index=settings.INDEX_NAME):
-            self.client.indices.delete(index=settings.INDEX_NAME)
+    def delete_index(self, index: str | None = None) -> None:
+        index = index or settings.INDEX_NAME
+        if self.client.indices.exists(index=index):
+            self.client.indices.delete(index=index)
 
-    def keyword_search(self, query: str, limit: int = 5) -> list[dict]:
+    def keyword_search(self, query: str, limit: int = 5, index: str | None = None) -> list[dict]:
         body = {"query": {"multi_match": {"query": query, "fields": ["text", "title^2"]}}}
-        return self._format_results(self.client.search(index=settings.INDEX_NAME, body=body, size=limit))
+        response = self.client.search(index=index or settings.INDEX_NAME, body=body, size=limit)
+        return self._format_results(response, index=index)
 
-    def semantic_search_cosine(self, query_vector: list[float], limit: int = 5) -> list[dict]:
+    def semantic_search_cosine(self, query_vector: list[float], limit: int = 5, index: str | None = None) -> list[dict]:
         body = {
             "query": {
                 "script_score": {
@@ -72,12 +78,21 @@ class ElasticsearchService:
                 }
             }
         }
-        return self._format_results(self.client.search(index=settings.INDEX_NAME, body=body, size=limit))
+        response = self.client.search(index=index or settings.INDEX_NAME, body=body, size=limit)
+        return self._format_results(response, index)
 
-    def hybrid_search(self, query: str, query_vector: list[float], limit: int = 5, rerank: bool = True) -> list[dict]:
+    def hybrid_search(
+        self,
+        query: str,
+        query_vector: list[float],
+        limit: int = 5,
+        rerank: bool = True,
+        index: str | None = None,
+    ) -> list[dict]:
+        target = index or settings.INDEX_NAME
         candidates = max(limit * 4, 10)
-        semantic_hits = self.semantic_search_cosine(query_vector, limit=candidates)
-        keyword_hits = self.keyword_search(query, limit=candidates)
+        semantic_hits = self.semantic_search_cosine(query_vector, limit=candidates, index=target)
+        keyword_hits = self.keyword_search(query, limit=candidates, index=target)
 
         fused = {}
         k = 60
@@ -118,7 +133,7 @@ class ElasticsearchService:
         except Exception:
             return ""
 
-    def _format_results(self, response: dict) -> list[dict]:
+    def _format_results(self, response: dict, index: str | None = None) -> list[dict]:
         results = []
         for hit in response["hits"]["hits"]:
             source = hit["_source"]
@@ -134,6 +149,10 @@ class ElasticsearchService:
                     "text": source.get("text"),
                     "source_url": source.get("source_url") or "",
                     "local_pdf": bool(source.get("local_pdf")),
+                    "span_start": source.get("span_start"),
+                    "span_end": source.get("span_end"),
+                    "strategy": source.get("strategy", ""),
+                    "_index": hit.get("_index") or index,
                 }
             )
         return results
