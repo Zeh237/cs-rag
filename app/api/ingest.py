@@ -71,6 +71,7 @@ def _process_document(paper_id: str, local_path: str, ext: str, meta: dict) -> d
             "category": meta["primary_category"],
             "local_path": relative_path,
             "url": meta["url"],
+            "original_filename": meta.get("original_filename", ""),
             "uploaded_at": datetime.now().isoformat(),
         }
         if ext == ".pdf":
@@ -103,13 +104,14 @@ async def ingest_document(
     all_categories: str = Form(...),
     url: str | None = Form(None),
 ):
-    ext = os.path.splitext(file.filename or "")[1].lower()
+    original_filename = os.path.basename(file.filename or "")
+    ext = os.path.splitext(original_filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Only .pdf, .md, or .txt documents are allowed.")
 
     os.makedirs(settings.NOTES_DIR, exist_ok=True)
     paper_id = uuid.uuid4().hex[:8]
-    local_path = os.path.join(settings.NOTES_DIR, f"{paper_id}_{file.filename}")
+    local_path = os.path.join(settings.NOTES_DIR, f"{paper_id}{ext}")
 
     try:
         with open(local_path, "wb") as buffer:
@@ -122,6 +124,7 @@ async def ingest_document(
         "authors": [a.strip() for a in authors.split(",") if a.strip()],
         "primary_category": primary_category,
         "url": url or "",
+        "original_filename": original_filename,
     }
     job_id = ingestion_manager.submit(_process_document, paper_id, local_path, ext, meta)
 

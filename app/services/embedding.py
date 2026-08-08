@@ -1,3 +1,6 @@
+from app.core.config import settings
+
+
 class EmbeddingService:
     def __init__(self) -> None:
         self._model = None
@@ -7,7 +10,7 @@ class EmbeddingService:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+            self._model = SentenceTransformer(settings.EMBEDDING_MODEL)
         return self._model
 
     def get_embeddings(self, text: str):

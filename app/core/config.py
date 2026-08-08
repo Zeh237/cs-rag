@@ -22,6 +22,7 @@ class Settings:
 
     LLM_API_BASE: str = os.getenv("LLM_API_BASE", "")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "")
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 
     REDIS_HOST: str = os.getenv("REDIS_HOST", "redis://localhost:6379/")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
