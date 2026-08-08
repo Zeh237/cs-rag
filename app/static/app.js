@@ -362,7 +362,8 @@ if (fileInput) fileInput.addEventListener('change', (e) => { handleFile(e.target
 
 function handleFile(file) {
     if (!file) return;
-    if (!file.name.endsWith('.pdf')) { showIngestResult('Only PDF files are supported.', true); return; }
+    const ok = ['.pdf', '.md', '.txt'].some(ext => file.name.toLowerCase().endsWith(ext));
+    if (!ok) { showIngestResult('Only PDF, Markdown, or Text files are supported.', true); return; }
     selectedFile = file;
     renderFileItem(file);
     updateIngestButton();
@@ -470,17 +471,20 @@ async function ingestFiles() {
             xhr.send(formData);
         });
         progressFill.style.width = '100%';
-        progressText.textContent = 'Processing complete!';
-        if (response.status === 200) {
-            const msg = response.data.message || `"${title}" ingested`;
-            showIngestResult(`✓ ${msg} — ${response.data.chunks_indexed} chunks indexed.`);
-            selectedFile = null;
-            if (fileList) fileList.innerHTML = '';
-            ['ingestTitle', 'ingestAuthors', 'ingestCategory', 'ingestAllCategories', 'ingestUrl'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.value = '';
-            });
-            updateIngestButton();
+        progressText.textContent = 'Upload complete. Indexing in background...';
+        if (response.status === 202) {
+            const final = await pollIngestStatus(response.data.job_id);
+            if (final.status === 'completed') {
+                showIngestResult(`✓ ${final.message} — ${final.chunks_indexed} chunks indexed.`);
+                selectedFile = null;
+                if (fileList) fileList.innerHTML = '';
+                ['ingestTitle', 'ingestAuthors', 'ingestCategory', 'ingestAllCategories', 'ingestUrl'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = '';
+                });
+            } else {
+                showIngestResult(final.error || final.message || 'Ingestion failed', true);
+            }
         } else {
             showIngestResult(response.data.detail || 'Ingestion failed', true);
         }
@@ -492,6 +496,21 @@ async function ingestFiles() {
             updateIngestButton();
         }, 1500);
     }
+}
+
+async function pollIngestStatus(jobId) {
+    for (let attempt = 0; attempt < 300; attempt++) {
+        try {
+            const res = await fetch(`${API_BASE}/api/v1/ingest/status/${jobId}`, { headers: authHeaders() });
+            const data = await res.json();
+            if (data.status === 'completed' || data.status === 'failed' || data.status === 'error') {
+                return data;
+            }
+            progressText.textContent = `Indexing... ${data.message || ''}`;
+        } catch { /* transient error, keep polling */ }
+        await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    return { status: 'failed', error: 'Timed out waiting for indexing to finish.' };
 }
 
 if (ingestBtn) ingestBtn.addEventListener('click', ingestFiles);
