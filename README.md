@@ -72,7 +72,9 @@ The system does not contain notes by default. Use the scripts to fetch and index
    python scripts/fetch_notes.py
    ```
 
-   This script downloads course notes from public GitHub repositories and PDF books. It writes the notes in the directory `NOTES_DIR` (default `./csc_notes`).
+   This script downloads open course notes as PDFs, stores each PDF locally in
+   `NOTES_DIR/pdfs/`, and normalizes its text into a Markdown file. Every note
+   therefore has a local PDF backing it.
 
 2. Index the notes into Elasticsearch:
 
@@ -80,15 +82,7 @@ The system does not contain notes by default. Use the scripts to fetch and index
    python scripts/index_library.py
    ```
 
-   This script converts each file into chunks and stores the chunks in the index `INDEX_NAME`.
-
-3. (Optional) Add papers to the legacy library:
-
-   ```bash
-   python scripts/download_papers.py
-   ```
-
-   This script downloads arXiv papers. It writes the papers in the directory `LIBRARY_DIR` (default `./csc_library`).
+   This script converts each file into chunks and stores the chunks in the index `INDEX_NAME`. Only notes with a local PDF are indexed (pass `--no-require-pdf` to include PDF-less sources).
 
 ## Configuration
 
@@ -103,7 +97,6 @@ Key variables:
 | `ES_PASSWORD` | The Elasticsearch password | `password` |
 | `INDEX_NAME` | The name of the search index | `csc_notes` |
 | `NOTES_DIR` | The directory that contains the notes | `./csc_notes` |
-| `LIBRARY_DIR` | The directory that contains the papers | `./csc_library` |
 | `LLM_API_BASE` | The base URL of the local LLM | empty |
 | `LLM_MODEL` | The name of the LLM | empty |
 | `EMBEDDING_MODEL` | The sentence-transformer model for embeddings | `BAAI/bge-small-en-v1.5` |
@@ -149,7 +142,6 @@ The app uses a bearer token for most requests. Register a user and log in to get
 | `POST` | `/api/v1/ingest` | Upload a document for indexing |
 | `GET` | `/api/v1/ingest/status/{job_id}` | Get the status of an ingest job |
 | `GET` | `/api/v1/pdf/{paper_id}` | Open a PDF; use `?chunk_id=...` to highlight a chunk |
-| `GET` | `/api/v1/library` | List the legacy paper library |
 | `GET` | `/search/keyword` | Keyword search (`?q=...&limit=5`) |
 | `GET` | `/search/semantic` | Semantic search (`?q=...&limit=5`) |
 | `GET` | `/rag/ask` | Ask a question (`?q=...&limit=2`) |
@@ -196,7 +188,7 @@ Fixed-size, sentence-bundled, and paragraph-style chunking are compared on the s
        --out eval/chunk_dataset.jsonl --count 100 --seed 42
    ```
 
-2. Index the same notes under the strategies (the current production chunker is `--strategy fixed --chunk-size 1000 --overlap 200`):
+2. Index the same notes under the strategies (the current production chunker is `--strategy fixed --chunk-size 1000 --overlap 200`). By default the indexer keeps only notes that have a local PDF in `csc_notes/pdfs/` (pass `--no-require-pdf` to include PDF-less sources):
 
    ```bash
    python scripts/index_library.py --index csc_notes_fixed1000    --strategy fixed --chunk-size 1000 --overlap 200 --only-md
@@ -225,6 +217,5 @@ app/static/         Web interface
 scripts/            Notes fetching, indexing, and paper download
 eval/               Synthetic retrieval datasets and evaluation results
 tests/              Automatic tests
-csc_notes/          The notes and their manifest
-csc_library/        The papers and their manifest
+csc_notes/          The notes, their local PDFs, and the manifest
 ```

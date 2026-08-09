@@ -134,6 +134,8 @@ class ElasticsearchService:
             return ""
 
     def _format_results(self, response: dict, index: str | None = None) -> list[dict]:
+        from app.services.pdf import pdf_service
+
         results = []
         for hit in response["hits"]["hits"]:
             source = hit["_source"]
@@ -148,7 +150,8 @@ class ElasticsearchService:
                     "page_number": source.get("page_number", 1),
                     "text": source.get("text"),
                     "source_url": source.get("source_url") or "",
-                    "local_pdf": bool(source.get("local_pdf")),
+                    "local_pdf": bool(source.get("local_pdf"))
+                    or bool(source.get("paper_id") and pdf_service.has_local_pdf(source["paper_id"])),
                     "span_start": source.get("span_start"),
                     "span_end": source.get("span_end"),
                     "strategy": source.get("strategy", ""),

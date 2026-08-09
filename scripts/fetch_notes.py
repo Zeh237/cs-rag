@@ -1,87 +1,41 @@
-"""Fetch a curated set of open undergraduate computer science notes into ./csc_notes.
+"""Fetch the PDF-backed open undergraduate computer science notes into ./csc_notes.
 
-Each source is normalized to a Markdown file under csc_notes/ and registered in
-csc_notes/library_metadata.json so it can be indexed by scripts/index_library.py.
+Each source is a PDF. The script downloads the PDF (stored locally under
+csc_notes/pdfs/), normalizes its text to a Markdown file under csc_notes/, and
+registers both in csc_notes/library_metadata.json so it can be indexed by
+scripts/index_library.py (which requires a local PDF per note).
+
+Only PDF sources are fetched: the RAG app links every result to a locally
+stored PDF, so marks/etc. without a local PDF are intentionally excluded.
 
 Sources:
-  - Crafting Interpreters            (Compilers, Markdown from GitHub)
-  - CNP3 2nd ed.                     (Computer Networking, reStructuredText from GitHub)
-  - Computer Science from the Bottom Up (OS/Computer Architecture, HTML)
-  - Open Data Structures             (Data Structures, PDF)
-  - Algorithms (Jeff Erickson)       (Algorithms, PDF)
-  - Models of Computation (Erickson) (Theory of Computation, PDF)
-  - Discrete Mathematics (Levin)     (Discrete Math, HTML)
-  - SQL for Web Nerds                (Databases, HTML)
-  - Software Engineering at Google   (Software Engineering, HTML)
-  - A Course in Machine Learning     (Intro ML, PDF)
+  - Open Data Structures (Python edition)  (Data Structures, PDF)
+  - Algorithms (Jeff Erickson)             (Algorithms, PDF)
+  - Models of Computation (Erickson)       (Theory of Computation, PDF)
+  - A Course in Machine Learning           (Intro ML, PDF)
+  - Think OS                                (Operating Systems, PDF)
+  - An Introduction to Computer Networks    (Networking, PDF)
+  - Basics of Compiler Design               (Compilers, PDF)
+  - Discrete Mathematics: An Open Introduction (Discrete Math, PDF)
 """
 
-import io
 import json
 import re
 import shutil
-import subprocess
 import sys
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import fitz
-import html2text
-from docutils.core import publish_parts
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 NOTES_DIR = PROJECT_ROOT / "csc_notes"
 MANIFEST_PATH = NOTES_DIR / "library_metadata.json"
-STAGING = PROJECT_ROOT / ".fetch_notes_tmp"
 
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 
-SKIP_FILES = {"contents.md", "index.md", "acknowledgements.md", "backmatter.md", "dedication.md", "welcome.md"}
-
 SOURCES = [
-    {
-        "category": "Compilers",
-        "title": "Crafting Interpreters",
-        "authors": "Robert Nystrom",
-        "license": "CC BY-NC-SA 4.0",
-        "kind": "github_md",
-        "repo": "munificent/craftinginterpreters",
-        "repo_paths": ["book"],
-        "url_base": "https://github.com/munificent/craftinginterpreters/blob/master/book",
-        "file_prefix": "compilers_crafting_interpreters",
-        "skip": SKIP_FILES,
-    },
-    {
-        "category": "Computer Networking",
-        "title": "Computer Networking: Principles, Protocols and Practice (2nd ed)",
-        "authors": "Olivier Bonaventure et al.",
-        "license": "CC BY 4.0",
-        "kind": "github_rst",
-        "repo": "obonaventure/cnp3",
-        "repo_paths": ["book-2nd/principles", "book-2nd/protocols"],
-        "url_base": "https://github.com/obonaventure/cnp3/blob/master/book-2nd",
-        "file_prefix": "networking_cnp3",
-    },
-    {
-        "category": "Operating Systems",
-        "title": "Computer Science from the Bottom Up",
-        "authors": "Ian Wienand",
-        "license": "CC BY-SA 3.0",
-        "kind": "html",
-        "url_base": "https://www.bottomupcs.com/",
-        "pages": [
-            "pf01", "ch01", "ch01s02", "ch01s03", "ch02", "ch02s02",
-            "ch03", "ch03s02", "ch03s03", "ch03s04",
-            "ch04", "ch04s02", "ch04s03", "ch04s04",
-            "ch05", "ch05s02", "ch05s03", "ch05s04", "ch05s05", "ch05s06", "ch05s07", "ch05s08",
-            "ch06", "ch06s02", "ch06s03", "ch06s04", "ch06s05", "ch06s06", "ch06s07", "ch06s08", "ch06s09", "ch06s10",
-            "ch07", "ch07s02", "ch07s03", "ch07s04", "ch07s05", "ch07s06",
-            "ch08", "ch08s02", "ch08s03", "ch08s04", "ch08s05", "ch08s06", "ch08s07",
-            "ch09", "ch09s02", "ch09s03", "ch09s04", "ch09s05",
-        ],
-        "file_prefix": "os_bottomupcs",
-    },
     {
         "category": "Data Structures",
         "title": "Open Data Structures (Python edition)",
@@ -123,41 +77,6 @@ SOURCES = [
         "file_prefix": "toc_erickson",
     },
     {
-        "category": "Discrete Mathematics",
-        "title": "Discrete Mathematics: An Open Introduction (3rd ed)",
-        "authors": "Oscar Levin",
-        "license": "CC BY-SA 4.0",
-        "kind": "html",
-        "url_base": "https://discrete.openmathbooks.org/dmoi3/",
-        "pages": ["frontmatter", "preface", "ch_intro", "ch_logic", "ch_counting", "ch_sequences", "ch_graphtheory"],
-        "file_prefix": "discrete_math_levin",
-    },
-    {
-        "category": "Databases",
-        "title": "SQL for Web Nerds",
-        "authors": "Philip Greenspun",
-        "license": "CC BY-SA 4.0",
-        "kind": "html",
-        "url_base": "https://philip.greenspun.com/sql/",
-        "pages": [
-            "preface", "introduction", "data-modeling", "queries", "complex-queries",
-            "transactions", "triggers", "views", "style", "procedural", "trees", "dates",
-            "limits", "tuning", "data-warehousing", "foreign-and-legacy-data", "afterword",
-            "your-own-rdbms", "getting-real-work-done",
-        ],
-        "file_prefix": "db_sql_for_web_nerds",
-    },
-    {
-        "category": "Software Engineering",
-        "title": "Software Engineering at Google",
-        "authors": "Titus Winters, Tom Manshreck, Hyrum Wright",
-        "license": "CC BY-NC-ND 4.0",
-        "kind": "html",
-        "url_base": "https://abseil.io/resources/swe-book/html/",
-        "pages": [f"ch{i:02d}" for i in range(1, 27)],
-        "file_prefix": "swe_at_google",
-    },
-    {
         "category": "Machine Learning",
         "title": "A Course in Machine Learning",
         "authors": "Hal Daumé III",
@@ -169,6 +88,48 @@ SOURCES = [
         ],
         "file_prefix": "ml_a_course_in_machine_learning",
     },
+    {
+        "category": "Operating Systems",
+        "title": "Think OS: A Brief Introduction to Operating Systems",
+        "authors": "Allen B. Downey",
+        "license": "CC BY-NC-SA 4.0",
+        "kind": "pdf",
+        "pages": [{"name": "think_os", "url": "https://greenteapress.com/thinkos/thinkos.pdf"}],
+        "file_prefix": "os_think_os",
+    },
+    {
+        "category": "Computer Networking",
+        "title": "An Introduction to Computer Networks",
+        "authors": "Peter L. Dordal",
+        "license": "CC BY-NC-ND 3.0",
+        "kind": "pdf",
+        "pages": [
+            {"name": "intro_to_computer_networks", "url": "https://intronetworks.cs.luc.edu/current2/ComputerNetworks.pdf"}
+        ],
+        "file_prefix": "net_intro_to_computer_networks",
+    },
+    {
+        "category": "Compilers",
+        "title": "Basics of Compiler Design",
+        "authors": "Torben Æ. Mogensen",
+        "license": "CC BY-NC-ND 3.0",
+        "kind": "pdf",
+        "pages": [
+            {"name": "basics_of_compiler_design", "url": "https://hjemmesider.diku.dk/~torbenm/Basics/basics_lulu2.pdf"}
+        ],
+        "file_prefix": "compilers_basics_of_compiler_design",
+    },
+    {
+        "category": "Discrete Mathematics",
+        "title": "Discrete Mathematics: An Open Introduction (3rd ed)",
+        "authors": "Oscar Levin",
+        "license": "CC BY-SA 4.0",
+        "kind": "pdf",
+        "pages": [
+            {"name": "open_intro", "url": "https://discrete.openmathbooks.org/pdfs/dmoi3-tablet.pdf"}
+        ],
+        "file_prefix": "discrete_math_open_intro",
+    },
 ]
 
 
@@ -177,7 +138,7 @@ def slugify(name: str) -> str:
     return name.strip("_")
 
 
-def write_md(filename: str, text: str) -> None:
+def write_md(filename: str, text: str) -> str:
     target = NOTES_DIR / f"{filename}.md"
     target.write_text(text, encoding="utf-8")
     return target.name
@@ -189,20 +150,7 @@ def http_get(url: str) -> bytes:
         return response.read()
 
 
-def html_to_md(html: str) -> str:
-    return html2text.html2text(html)
-
-
-def rst_to_md(rst: str) -> str:
-    html = publish_parts(
-        rst,
-        writer_name="html",
-        settings_overrides={"report_level": 5, "halt_level": 5, "warning_stream": io.StringIO()},
-    )["body"]
-    return html_to_md(html)
-
-
-def pdf_to_md(pdf_bytes: bytes, source_url: str) -> str:
+def pdf_to_md(pdf_bytes: bytes) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     pages = []
     for i, page in enumerate(doc, start=1):
@@ -213,106 +161,13 @@ def pdf_to_md(pdf_bytes: bytes, source_url: str) -> str:
     return "\n\n".join(pages)
 
 
-def clone_sparse(repo: str, paths: list[str]) -> Path:
-    STAGING.mkdir(exist_ok=True)
-    target = STAGING / repo.replace("/", "_")
-    if target.exists():
-        shutil.rmtree(target)
-    subprocess.run(
-        ["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse", f"https://github.com/{repo}.git", str(target)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "sparse-checkout", "set", *paths],
-        cwd=target,
-        check=True,
-        capture_output=True,
-    )
-    return target
-
-
-def handle_github(source: dict, manifest: list[dict]) -> None:
-    paths = source["repo_paths"]
-    target = clone_sparse(source["repo"], paths)
-    ext = "*.md" if source["kind"] == "github_md" else "*.rst"
-    skip = source.get("skip", set())
-    used_names: set[str] = set()
-
-    for root in [target / p for p in paths]:
-        files = sorted(root.glob(ext))
-        if source["kind"] == "github_rst":
-            files = [p for p in files if p.parent.name in ("principles", "protocols")]
-
-        for path in files:
-            if path.name in skip:
-                continue
-            rel = path.relative_to(target)
-            prefix = f"{source['file_prefix']}_{slugify(rel.stem)}"
-            if prefix in used_names:
-                prefix = f"{prefix}_{len(used_names)}"
-            used_names.add(prefix)
-            raw = path.read_text(encoding="utf-8", errors="ignore")
-            if source["kind"] == "github_rst":
-                try:
-                    raw = rst_to_md(raw)
-                except Exception:
-                    raw = re.sub(r"^=+\s*$|^-+\s*$", "", raw, flags=re.MULTILINE)
-            filename = write_md(prefix, raw)
-            manifest.append(
-                {
-                    "id": prefix,
-                    "title": f"{source['title']} - {rel.stem}",
-                    "authors": [source["authors"]],
-                    "category": source["category"],
-                    "license": source.get("license", ""),
-                    "local_path": f"{NOTES_DIR.relative_to(PROJECT_ROOT)}/{filename}",
-                    "url": f"{source['url_base']}/{rel}",
-                }
-            )
-            print(f"  + {filename}")
-
-
-def handle_html(source: dict, manifest: list[dict]) -> None:
-    def fetch(page: str) -> tuple[str, str]:
-        url = f"{source['url_base']}{page}.html"
-        html = http_get(url).decode("utf-8", errors="ignore")
-        md = html_to_md(html)
-        md = f"# {page}\n\nSource: {url}\n\n" + md
-        prefix = f"{source['file_prefix']}_{slugify(page)}"
-        return prefix, md
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(fetch, page): page for page in source["pages"]}
-        for future in as_completed(futures):
-            page = futures[future]
-            try:
-                prefix, md = future.result()
-            except Exception as e:
-                print(f"  ! failed {page}: {e}")
-                continue
-            filename = write_md(prefix, md)
-            manifest.append(
-                {
-                    "id": prefix,
-                    "title": f"{source['title']} - {page}",
-                    "authors": [source["authors"]],
-                    "category": source["category"],
-                    "license": source.get("license", ""),
-                    "local_path": f"{NOTES_DIR.relative_to(PROJECT_ROOT)}/{filename}",
-                    "url": f"{source['url_base']}{page}.html",
-                }
-            )
-            print(f"  + {filename}")
-
-
 def handle_pdf(source: dict, manifest: list[dict]) -> None:
     pdf_dir = NOTES_DIR / "pdfs"
     pdf_dir.mkdir(exist_ok=True)
 
     def fetch(page: dict) -> tuple[str, str, str]:
         pdf = http_get(page["url"])
-        md = pdf_to_md(pdf, page["url"])
+        md = pdf_to_md(pdf)
         md = f"# {page['name']}\n\nSource: {page['url']}\n\n" + md
         prefix = f"{source['file_prefix']}_{slugify(page['name'])}"
         pdf_filename = f"{prefix}.pdf"
@@ -353,21 +208,16 @@ def main() -> None:
     for source in SOURCES:
         print(f"\n--- {source['category']}: {source['title']} ---")
         try:
-            if source["kind"] in ("github_md", "github_rst"):
-                handle_github(source, manifest)
-            elif source["kind"] == "html":
-                handle_html(source, manifest)
-            elif source["kind"] == "pdf":
+            if source["kind"] == "pdf":
                 handle_pdf(source, manifest)
+            else:
+                print(f"  ! unknown source kind: {source['kind']}")
         except Exception as e:
             print(f"  ! source failed: {e}")
             continue
 
     with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=4, ensure_ascii=False)
-
-    if STAGING.exists():
-        shutil.rmtree(STAGING)
 
     print(f"\nFetched {len(manifest)} note files into {NOTES_DIR}")
 

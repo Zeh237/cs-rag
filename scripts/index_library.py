@@ -13,6 +13,7 @@ from app.services.chunking import CHUNK_STRATEGIES, chunk_document, parse_docume
 from app.services.document import document_processor
 from app.services.elasticsearch import es_service
 from app.services.embedding import embedding_service
+from app.services.pdf import pdf_service
 
 SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md"}
 
@@ -52,6 +53,7 @@ def build_actions(
     chunk_size: int,
     overlap: int,
     only_md: bool,
+    require_pdf: bool = True,
 ) -> list[dict]:
     document_files = [f for f in notes_dir.iterdir() if f.suffix.lower() in SUPPORTED_EXTENSIONS]
     if only_md:
@@ -61,6 +63,9 @@ def build_actions(
     for file_path in sorted(document_files):
         meta = metadata_map.get(file_path.name, {})
         paper_id = meta.get("id") or meta.get("paper_id") or file_path.stem
+        if require_pdf and not pdf_service.has_local_pdf(paper_id):
+            print(f"  - skipping {file_path.name}: no local PDF available")
+            continue
         chunks = prepare_chunks(file_path, strategy, chunk_size, overlap)
 
         for idx, chunk in enumerate(chunks):
@@ -75,7 +80,7 @@ def build_actions(
                 "text": chunk["text"],
                 "highlight_boxes": chunk.get("highlight_boxes", {}),
                 "source_url": meta.get("url") or "",
-                "local_pdf": bool(meta.get("pdf_path")),
+                "local_pdf": bool(pdf_service.has_local_pdf(paper_id)) or bool(meta.get("pdf_path")),
                 "vector_embedding": embedding_service.get_embeddings(chunk["text"]),
             }
             if strategy in CHUNK_STRATEGIES:
@@ -94,6 +99,8 @@ def main() -> None:
     parser.add_argument("--chunk-size", type=int, default=300)
     parser.add_argument("--overlap", type=int, default=45)
     parser.add_argument("--only-md", action="store_true", default=False)
+    parser.add_argument("--no-require-pdf", action="store_true", default=False,
+                        help="Include notes even when no local PDF is available (default: only PDF-backed notes).")
     parser.add_argument("--delete-first", action="store_true", default=False)
     args = parser.parse_args()
 
@@ -115,6 +122,7 @@ def main() -> None:
         args.chunk_size,
         args.overlap,
         args.only_md,
+        require_pdf=not args.no_require_pdf,
     )
     if not actions:
         print("No chunks prepared for indexing.")

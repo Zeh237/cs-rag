@@ -56,7 +56,7 @@ def _retrieve(search_query: str, limit: int) -> list[dict]:
 @router.get("/ask", response_model=RagResponse)
 async def ask_rag(q: str = Query(...), limit: int = 2, window_size: int = 1):
     try:
-        search_query = await llm_service.rewrite_query_for_search(q, None)
+        search_query = q
         hits = _retrieve(search_query, limit)
         if not hits:
             return RagResponse(question=q, answer="No matching notes found in the CS notes library. Try rephrasing your question.")
@@ -85,7 +85,7 @@ async def ask_rag_stream(
         await chat_service.get_chat(chat_id, current_user.id, db)
         session_id = str(chat_id)
         history = await memory_store.get_history(session_id)
-        search_query = await llm_service.rewrite_query_for_search(q, history)
+        search_query = q
         hits = _retrieve(search_query, limit)
 
         if not hits:

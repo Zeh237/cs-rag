@@ -36,9 +36,9 @@ class PdfService:
     def serve(self, paper_id: str, chunk_id: str | None = None) -> Response:
         notes_entry = self._find_notes_entry(paper_id)
         if notes_entry:
-            pdf_path = notes_entry.get("pdf_path")
-            if pdf_path:
-                return self._serve_note_pdf(pdf_path, chunk_id)
+            local_path = self.local_pdf_path(paper_id)
+            if local_path:
+                return self._serve_note_pdf(local_path, chunk_id)
             if notes_entry.get("url"):
                 return RedirectResponse(notes_entry["url"], status_code=302)
 
@@ -131,6 +131,36 @@ class PdfService:
         if not os.path.exists(local_path):
             raise FileNotFoundError("PDF file not found on disk.")
         return local_path
+
+    def _notes_pdf_path(self, paper_id: str) -> str | None:
+        """Find a local PDF for a note even when the manifest lacks pdf_path."""
+        notes_dir = os.path.join(PROJECT_ROOT, settings.NOTES_DIR)
+        for candidate in (
+            os.path.join(notes_dir, "pdfs", f"{paper_id}.pdf"),
+            os.path.join(notes_dir, f"{paper_id}.pdf"),
+        ):
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+
+    def local_pdf_path(self, paper_id: str) -> str | None:
+        """Path to the PDF we can serve locally for a paper, or None."""
+        notes_entry = self._find_notes_entry(paper_id)
+        if notes_entry is not None:
+            candidate = notes_entry.get("pdf_path") or self._notes_pdf_path(paper_id)
+            if not candidate:
+                return None
+            base_path = os.path.join(PROJECT_ROOT, candidate) if not os.path.isabs(candidate) else candidate
+            return base_path if os.path.isfile(base_path) else None
+
+        try:
+            candidate = self._resolve_path(paper_id)
+        except Exception:
+            return None
+        return candidate if os.path.isfile(candidate) else None
+
+    def has_local_pdf(self, paper_id: str) -> bool:
+        return self.local_pdf_path(paper_id) is not None
 
     def _find_notes_entry(self, paper_id: str) -> dict | None:
         if not os.path.exists(self.notes_manifest_path):
