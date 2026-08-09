@@ -1,10 +1,8 @@
-import json
 import os
 import re
 
 import fitz
 
-from app.core.config import settings
 from app.services.highlight import compute_highlight_boxes
 
 _BIBLIOGRAPHY_PATTERNS = [
@@ -15,10 +13,6 @@ _BIBLIOGRAPHY_PATTERNS = [
 
 
 class DocumentProcessor:
-    def __init__(self) -> None:
-        self.library_dir = settings.LIBRARY_DIR
-        self.manifest_path = settings.MANIFEST_PATH
-
     def chunk_pdf(self, file_path: str, chunk_size: int = 1000, overlap: int = 200) -> list[dict]:
         if not os.path.exists(file_path):
             raise FileNotFoundError(file_path)
@@ -121,26 +115,6 @@ class DocumentProcessor:
                 break
             i += chunk_size - overlap
         return chunks
-
-    def append_to_manifest(self, metadata: dict) -> None:
-        os.makedirs(self.library_dir, exist_ok=True)
-        manifest = self._read_manifest()
-        if not any(item["id"] == metadata["id"] for item in manifest):
-            manifest.append(metadata)
-            self._write_manifest(manifest)
-
-    def _read_manifest(self) -> list[dict]:
-        if not os.path.exists(self.manifest_path):
-            return []
-        with open(self.manifest_path, "r", encoding="utf-8") as f:
-            try:
-                return json.load(f)
-            except json.JSONDecodeError:
-                return []
-
-    def _write_manifest(self, manifest: list[dict]) -> None:
-        with open(self.manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=4, ensure_ascii=False)
 
     def _bibliography_cutoff(self, word_pages: list[tuple[str, int]]) -> int:
         combined = " ".join(word for word, _ in word_pages)

@@ -14,9 +14,6 @@ class Settings:
     ES_PASSWORD: str = os.getenv("ES_PASSWORD", "password")
     INDEX_NAME: str = os.getenv("INDEX_NAME", "csc_notes")
 
-    LIBRARY_DIR: str = os.getenv("LIBRARY_DIR", "./csc_library")
-    MANIFEST_PATH: str = os.path.join(LIBRARY_DIR, "library_metadata.json")
-
     NOTES_DIR: str = os.getenv("NOTES_DIR", "./csc_notes")
     NOTES_MANIFEST: str = os.path.join(NOTES_DIR, "library_metadata.json")
 

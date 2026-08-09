@@ -7,7 +7,6 @@ _TMP = pathlib.Path(tempfile.mkdtemp(prefix="rag_tests_"))
 
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TMP / 'test.db'}"
 os.environ["NOTES_DIR"] = str(_TMP / "csc_notes")
-os.environ["LIBRARY_DIR"] = str(_TMP / "csc_library")
 os.environ["INDEX_NAME"] = "test_csc_notes"
 os.environ["LLM_API_BASE"] = "http://127.0.0.1:9/v1"
 os.environ["LLM_MODEL"] = "test-model"

@@ -13,7 +13,6 @@ from app.services.elasticsearch import es_service
 
 class PdfService:
     def __init__(self) -> None:
-        self.manifest_path = settings.MANIFEST_PATH
         self.notes_manifest_path = settings.NOTES_MANIFEST
         self.index_name = settings.INDEX_NAME
         self._cache: dict[str, tuple[float, bytes]] = {}
@@ -35,49 +34,15 @@ class PdfService:
 
     def serve(self, paper_id: str, chunk_id: str | None = None) -> Response:
         notes_entry = self._find_notes_entry(paper_id)
-        if notes_entry:
-            local_path = self.local_pdf_path(paper_id)
-            if local_path:
-                return self._serve_note_pdf(local_path, chunk_id)
-            if notes_entry.get("url"):
-                return RedirectResponse(notes_entry["url"], status_code=302)
+        if notes_entry is None:
+            raise FileNotFoundError(f"Note '{paper_id}' not found in the notes manifest.")
 
-        local_path = self._resolve_path(paper_id)
-        if not chunk_id:
-            return self._plain_response(local_path)
-
-        cache_key = f"paper:{local_path}:{chunk_id}"
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return self._stream_pdf(cached)
-
-        try:
-            source = es_service.client.get(index=self.index_name, id=chunk_id)["_source"]
-            page_num = source.get("page_number", 1)
-            highlight_boxes = source.get("highlight_boxes") or {}
-
-            doc = fitz.open(local_path)
-            if highlight_boxes:
-                for page_str, rects in highlight_boxes.items():
-                    page_idx = int(page_str) - 1
-                    if 0 <= page_idx < len(doc):
-                        page = doc[page_idx]
-                        for rect in rects:
-                            annot = page.add_highlight_annot(fitz.Rect(*rect))
-                            annot.set_colors(stroke=(1, 0.8, 0))
-                            annot.update()
-            else:
-                self._highlight_by_search(doc, source["text"], page_num)
-
-            buffer = io.BytesIO()
-            doc.save(buffer)
-            doc.close()
-            buffer.seek(0)
-            data = buffer.getvalue()
-            self._set_cached(cache_key, data)
-            return self._stream_pdf(data)
-        except Exception:
-            return self._plain_response(local_path)
+        local_path = self.local_pdf_path(paper_id)
+        if local_path:
+            return self._serve_note_pdf(local_path, chunk_id)
+        if notes_entry.get("url"):
+            return RedirectResponse(notes_entry["url"], status_code=302)
+        raise FileNotFoundError(f"Note '{paper_id}' has no local PDF or source URL.")
 
     def _plain_response(self, local_path: str) -> Response:
         return FileResponse(local_path, media_type="application/pdf", headers={"Content-Disposition": "inline"})
@@ -115,23 +80,6 @@ class PdfService:
     def _stream_pdf(self, data: bytes) -> Response:
         return StreamingResponse(io.BytesIO(data), media_type="application/pdf", headers={"Content-Disposition": "inline"})
 
-    def _resolve_path(self, paper_id: str) -> str:
-        if not os.path.exists(self.manifest_path):
-            raise FileNotFoundError("Library manifest not found.")
-        with open(self.manifest_path, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
-
-        entry = self._match_entry(manifest, paper_id)
-        if entry is None:
-            raise FileNotFoundError(f"Paper '{paper_id}' not found in manifest.")
-
-        local_path = entry.get("local_path", "")
-        if not os.path.isabs(local_path):
-            local_path = os.path.join(PROJECT_ROOT, local_path)
-        if not os.path.exists(local_path):
-            raise FileNotFoundError("PDF file not found on disk.")
-        return local_path
-
     def _notes_pdf_path(self, paper_id: str) -> str | None:
         """Find a local PDF for a note even when the manifest lacks pdf_path."""
         notes_dir = os.path.join(PROJECT_ROOT, settings.NOTES_DIR)
@@ -144,20 +92,15 @@ class PdfService:
         return None
 
     def local_pdf_path(self, paper_id: str) -> str | None:
-        """Path to the PDF we can serve locally for a paper, or None."""
+        """Path to the local PDF for a note, or None."""
         notes_entry = self._find_notes_entry(paper_id)
-        if notes_entry is not None:
-            candidate = notes_entry.get("pdf_path") or self._notes_pdf_path(paper_id)
-            if not candidate:
-                return None
-            base_path = os.path.join(PROJECT_ROOT, candidate) if not os.path.isabs(candidate) else candidate
-            return base_path if os.path.isfile(base_path) else None
-
-        try:
-            candidate = self._resolve_path(paper_id)
-        except Exception:
+        if notes_entry is None:
             return None
-        return candidate if os.path.isfile(candidate) else None
+        candidate = notes_entry.get("pdf_path") or self._notes_pdf_path(paper_id)
+        if not candidate:
+            return None
+        base_path = os.path.join(PROJECT_ROOT, candidate) if not os.path.isabs(candidate) else candidate
+        return base_path if os.path.isfile(base_path) else None
 
     def has_local_pdf(self, paper_id: str) -> bool:
         return self.local_pdf_path(paper_id) is not None

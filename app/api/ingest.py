@@ -150,11 +150,3 @@ def serve_pdf(paper_id: str, chunk_id: str | None = None):
         return pdf_service.serve(paper_id, chunk_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
-
-
-@router.get("/library")
-async def get_library():
-    if not os.path.exists(settings.MANIFEST_PATH):
-        return []
-    with open(settings.MANIFEST_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)

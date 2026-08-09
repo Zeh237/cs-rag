@@ -12,4 +12,3 @@ elasticsearch>=8.12
 python-multipart>=0.0.9
 pymupdf>=1.24
 sentence-transformers>=3.0
-arxiv>=2.1

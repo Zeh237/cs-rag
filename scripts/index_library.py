@@ -92,7 +92,7 @@ def build_actions(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Index the notes (and optional library PDFs) into Elasticsearch.")
+    parser = argparse.ArgumentParser(description="Index the notes into Elasticsearch.")
     parser.add_argument("--index", default=settings.INDEX_NAME)
     parser.add_argument("--notes-dir", default=settings.NOTES_DIR)
     parser.add_argument("--strategy", choices=CHUNK_STRATEGIES, default=None)
