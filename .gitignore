@@ -12,3 +12,4 @@ __pycache__/
 /eval/results_*.csv
 /eval/*.cache.json
 /eval/*_queries.csv
+.pytest_cache/

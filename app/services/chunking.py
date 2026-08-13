@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from app.services.page_cleaner import clean_markdown
 
 _PAGE_RE = re.compile(r"^\[\[PAGE (\d+)\]\]$")
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$")
@@ -48,6 +50,7 @@ class Section:
 class ParsedDoc:
     words: list[str]
     sections: list[Section]
+    word_pages: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -56,6 +59,8 @@ class Chunk:
     span_end: int
     text: str
     heading: str = ""
+    page_start: int | None = None
+    page_end: int | None = None
 
 
 def span_overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> float:
@@ -79,8 +84,11 @@ def _is_noise_line(line: str) -> bool:
 
 
 def parse_document(text: str) -> ParsedDoc:
+    text = clean_markdown(text)
     words: list[str] = []
+    word_pages: list[int] = []
     sections: list[Section] = []
+    current_page = 1
 
     def current_section() -> Section:
         if not sections:
@@ -108,6 +116,14 @@ def parse_document(text: str) -> ParsedDoc:
             sections.append(Section(_MD_EMPH_RE.sub("", heading.group(1)).strip(), []))
             continue
 
+        page_match = _PAGE_RE.match(stripped)
+        if page_match:
+            if para_start >= 0:
+                flush_paragraph(para_start, len(words))
+                para_start = -1
+            current_page = int(page_match.group(1))
+            continue
+
         if _is_noise_line(line):
             if para_start >= 0:
                 flush_paragraph(para_start, len(words))
@@ -118,12 +134,13 @@ def parse_document(text: str) -> ParsedDoc:
             para_start = len(words)
         tokens = [tok for tok in _MD_EMPH_RE.sub("", line).split() if tok]
         words.extend(tokens)
+        word_pages.extend([current_page] * len(tokens))
 
     if para_start >= 0:
         flush_paragraph(para_start, len(words))
 
     # Drop empty trailing sections introduced by a heading without body content.
-    return ParsedDoc(words=words, sections=[s for s in sections if s.paragraphs])
+    return ParsedDoc(words=words, sections=[s for s in sections if s.paragraphs], word_pages=word_pages)
 
 
 def merge_text(words: list[str], start: int, end: int, heading: str) -> str:
@@ -198,10 +215,17 @@ def chunk_document(
         raise ValueError(f"unknown strategy {strategy!r}; expected one of {CHUNK_STRATEGIES}")
 
     if strategy == "fixed":
-        return _chunk_fixed(doc, target, overlap)
-    if strategy == "paragraph":
-        return _chunk_paragraph(doc, target)
-    return _chunk_sentence(doc, target, overlap)
+        chunks = _chunk_fixed(doc, target, overlap)
+    elif strategy == "paragraph":
+        chunks = _chunk_paragraph(doc, target, overlap)
+    else:
+        chunks = _chunk_sentence(doc, target, overlap)
+
+    for chunk in chunks:
+        if doc.word_pages and chunk.span_end > chunk.span_start:
+            chunk.page_start = doc.word_pages[chunk.span_start]
+            chunk.page_end = doc.word_pages[chunk.span_end - 1]
+    return chunks
 
 
 def _chunk_fixed(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
@@ -260,34 +284,42 @@ def _pack(ranges: list[tuple[int, int]], doc: ParsedDoc, section: Section) -> Ch
     return Chunk(start, end, merge_text(doc.words, start, end, section.heading), section.heading)
 
 
-def _chunk_paragraph(doc: ParsedDoc, target: int) -> list[Chunk]:
+def _chunk_paragraph(doc: ParsedDoc, target: int, overlap: int = 0) -> list[Chunk]:
     chunks: list[Chunk] = []
     for section in doc.sections:
-        current: list[Paragraph] = []
-        current_words = 0
-        for paragraph in section.paragraphs:
+        paragraphs = section.paragraphs
+        i = 0
+        while i < len(paragraphs):
+            paragraph = paragraphs[i]
             size = paragraph.end - paragraph.start
             if size >= target * 2:
-                if current:
-                    chunks.append(_pack_paragraphs(current, doc, section))
-                    current = []
-                    current_words = 0
                 start, end = paragraph.start, paragraph.end
                 for s, e in _split_oversized_range(doc.words, start, end, target, overlap=target // 4):
                     chunks.append(Chunk(s, e, merge_text(doc.words, s, e, section.heading), section.heading))
+                i += 1
                 continue
-            if current and current_words + size > target:
-                chunks.append(_pack_paragraphs(current, doc, section))
-                current = []
-                current_words = 0
-            current.append(paragraph)
-            current_words += size
-        if current:
-            chunks.append(_pack_paragraphs(current, doc, section))
+            current = [paragraph]
+            current_words = size
+            j = i + 1
+            while j < len(paragraphs):
+                nxt = paragraphs[j]
+                nxt_size = nxt.end - nxt.start
+                if nxt_size >= target * 2:
+                    break
+                if current_words + nxt_size > target:
+                    break
+                current.append(nxt)
+                current_words += nxt_size
+                j += 1
+            start = current[0].start
+            end = current[-1].end
+            chunks.append(Chunk(start, end, merge_text(doc.words, start, end, section.heading), section.heading))
+            if overlap > 0 and j < len(paragraphs):
+                cutoff = end - overlap
+                nxt = j
+                while nxt > i and paragraphs[nxt - 1].start >= cutoff:
+                    nxt -= 1
+                i = nxt if nxt > i else j
+            else:
+                i = j
     return chunks
-
-
-def _pack_paragraphs(paragraphs: list[Paragraph], doc: ParsedDoc, section: Section) -> Chunk:
-    start = paragraphs[0].start
-    end = paragraphs[-1].end
-    return Chunk(start, end, merge_text(doc.words, start, end, section.heading), section.heading)

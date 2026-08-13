@@ -3,6 +3,7 @@ const API_BASE = '';
 let authToken = localStorage.getItem('csc_token') || null;
 let currentUser = JSON.parse(localStorage.getItem('csc_user') || 'null');
 let activeChatId = null;
+let capabilities = null;
 
 // ─── Auth Helpers ─────────────────────────────────────────────────────────────
 function authHeaders() {
@@ -185,12 +186,31 @@ async function checkHealth() {
     try {
         const res  = await fetch(`${API_BASE}/health`);
         const data = await res.json();
+        capabilities = data;
         const ok   = data.status === 'ok' && data.elasticsearch;
         indicator.querySelector('.dot').style.background = ok ? '#4ade80' : '#f87171';
         indicator.querySelector('span:last-child').textContent = ok ? 'Connected' : 'Disconnected';
+        updateModeBar();
     } catch {
         indicator.querySelector('.dot').style.background = '#f87171';
         indicator.querySelector('span:last-child').textContent = 'Offline';
+    }
+}
+
+function updateModeBar() {
+    const researchLabel = document.getElementById('researchModeLabel');
+    const hintEl        = document.getElementById('chatModeHint');
+    const researchRadio = researchLabel?.querySelector('input[value="research"]');
+
+    if (capabilities?.vision_enabled) {
+        researchLabel?.classList.remove('disabled');
+        researchLabel?.setAttribute('title', `Vision model reads PDF pages as images (${capabilities.vision_model || 'vision model'})`);
+        if (hintEl) hintEl.textContent = `Vision: ${capabilities.vision_model || 'on'} · LLM: ${capabilities.llm_model || 'n/a'}`;
+    } else {
+        researchLabel?.classList.add('disabled');
+        researchLabel?.setAttribute('title', 'Vision model not configured — research mode unavailable');
+        if (researchRadio) researchRadio.disabled = true;
+        if (hintEl) hintEl.textContent = capabilities?.llm_model ? `LLM: ${capabilities.llm_model}` : '';
     }
 }
 
@@ -678,6 +698,27 @@ function renderMarkdown(md) {
     return html;
 }
 
+function linkifyCitations(md, citations) {
+    if (!citations || !citations.length) return md;
+    return md.replace(/\[(\d+)\](?!\()/g, (match, idx) => {
+        const n = parseInt(idx, 10);
+        const c = citations[n - 1];
+        if (!c) return match;
+        const url = `/api/v1/pdf/${encodeURIComponent(c.paper_id)}?chunk_id=${encodeURIComponent(c.chunk_id)}#page=${c.page}`;
+        return `[${idx}](${url})`;
+    });
+}
+
+function linkifyPageRefs(md, paperId) {
+    if (!paperId) return md;
+    return md.replace(/\(p{1,2}\.\s*(\d+(?:\s*[-–]\s*\d+)?)\)/g, (match, body) => {
+        const page = (body.match(/\d+/) || [])[0];
+        if (!page) return match;
+        const url = `/api/v1/pdf/${encodeURIComponent(paperId)}#page=${page}`;
+        return `[(p. ${body})](${url})`;
+    });
+}
+
 function addChatMessage(role, content) {
     if (!chatMessages) return null;
     const welcome = chatMessages.querySelector('.chat-welcome');
@@ -787,11 +828,16 @@ if (queryBtn) {
 
         let mdBuffer   = '';
         let sourcesData = null;
+        let citationsData = null;
+        let researchInfo = null;
         let assistantMsg = null;
         let bubble = null;
 
         try {
-            const url = `${API_BASE}/rag/ask/stream?q=${encodeURIComponent(question)}&chat_id=${activeChatId}&limit=3&window_size=1`;
+            const modeRadio = document.querySelector('input[name="answerMode"]:checked');
+            const mode = modeRadio ? modeRadio.value : 'auto';
+            const modeParam = mode === 'auto' ? '' : `&mode=${mode}`;
+            const url = `${API_BASE}/rag/ask/stream?q=${encodeURIComponent(question)}&chat_id=${activeChatId}&limit=4&window_size=2${modeParam}`;
             const res = await fetch(url, { headers: { 'Authorization': `Bearer ${authToken}` } });
 
             if (res.status === 401) { clearSession(); showAuthOverlay(); return; }
@@ -823,6 +869,14 @@ if (queryBtn) {
 
                     if (eventType === 'sources') {
                         try { sourcesData = JSON.parse(dataLine); } catch (e) { console.error('Sources parse error', e); }
+                    } else if (eventType === 'citations') {
+                        try { citationsData = JSON.parse(dataLine); } catch (e) { console.error('Citations parse error', e); }
+                    } else if (eventType === 'research') {
+                        try {
+                            researchInfo = JSON.parse(dataLine);
+                            const t = document.querySelector('#typingIndicator .chat-thinking-text');
+                            if (t) t.textContent = `Researching ${researchInfo.title || 'the document'}…`;
+                        } catch (e) { console.error('Research parse error', e); }
                     } else if (eventType === 'token') {
                         try {
                             const token = JSON.parse(dataLine);
@@ -833,7 +887,7 @@ if (queryBtn) {
                                 bubble = assistantMsg.querySelector('.chat-bubble');
                             }
                             if (bubble) {
-                                bubble.innerHTML = renderMarkdown(mdBuffer) + '<span class="stream-cursor"></span>';
+                                bubble.innerHTML = renderMarkdown(linkifyCitations(linkifyPageRefs(mdBuffer, researchInfo?.paper_id), citationsData)) + '<span class="stream-cursor"></span>';
                                 chatMessages.scrollTop = chatMessages.scrollHeight;
                             }
                         } catch (e) { console.error('Token parse error', e); }
@@ -843,7 +897,7 @@ if (queryBtn) {
                     } else if (eventType === 'done') {
                         removeTypingIndicator();
                         if (mdBuffer && bubble) {
-                            bubble.innerHTML = renderMarkdown(mdBuffer);
+                            bubble.innerHTML = renderMarkdown(linkifyCitations(linkifyPageRefs(mdBuffer, researchInfo?.paper_id), citationsData));
                             if (sourcesData && sourcesData.length > 0) {
                                 const sourcesEl = renderChatSources(sourcesData);
                                 if (sourcesEl) assistantMsg.appendChild(sourcesEl);

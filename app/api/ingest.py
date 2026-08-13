@@ -4,7 +4,7 @@ import shutil
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from app.core.config import PROJECT_ROOT, settings
 from app.services.document import document_processor
@@ -145,8 +145,8 @@ async def ingest_status(job_id: str):
 
 
 @router.get("/pdf/{paper_id}")
-def serve_pdf(paper_id: str, chunk_id: str | None = None):
+def serve_pdf(request: Request, paper_id: str, chunk_id: str | None = None):
     try:
-        return pdf_service.serve(paper_id, chunk_id)
+        return pdf_service.serve(paper_id, chunk_id, request.headers.get("range"))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

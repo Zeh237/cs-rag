@@ -40,6 +40,28 @@ def test_parse_document_words_and_sections():
     assert doc.sections[2].heading == "1.2 More"
 
 
+def test_parse_document_tracks_page_per_word():
+    doc = parse_document("[[PAGE 4]]\n\nAlpha beta gamma.\n\n[[PAGE 5]]\n\nDelta epsilon.")
+    assert doc.word_pages == [4, 4, 4, 5, 5]
+
+
+def test_parse_document_pages_default_to_one():
+    doc = parse_document("# H\n\nAlpha beta.")
+    assert doc.word_pages == [1, 1]
+
+
+def test_chunks_carry_page_ranges():
+    doc = parse_document("[[PAGE 10]]\n\n" + ("alpha " * 45) + "\n\n[[PAGE 11]]\n\n" + ("beta " * 45))
+    chunks = chunk_document(doc, strategy="fixed", target=20, overlap=0)
+    assert all(c.page_start is not None for c in chunks)
+    for c in chunks:
+        assert c.page_end >= c.page_start
+        assert c.page_start in (10, 11)
+        assert c.page_end in (10, 11)
+    crossing = next(c for c in chunks if c.page_start == 10 and c.page_end == 11)
+    assert crossing is not None
+
+
 def test_parse_document_paragraph_ranges_are_contiguous():
     doc = parse_document(SAMPLE_DOC)
     for section in doc.sections:
@@ -165,6 +187,24 @@ def test_paragraph_oversized_split_stays_bounded():
     chunks = chunk_document(doc, "paragraph", target=100)
     assert chunks
     assert all(c.span_end - c.span_start <= 100 for c in chunks)
+
+
+def test_paragraph_overlap_creates_shared_words():
+    paragraphs = [
+        "Alpha beta gamma delta epsilon zeta",
+        "Eta theta iota kappa lambda mu",
+        "Nu xi omicron pi rho sigma",
+        "Tau upsilon phi chi psi omega",
+        "One two three four five six",
+        "Seven eight nine ten eleven twelve",
+    ]
+    doc = parse_document("# Club\n\n" + "\n\n".join(paragraphs))
+    starts = {p.start for s in doc.sections for p in s.paragraphs}
+    ends = {p.end for s in doc.sections for p in s.paragraphs}
+    chunks = chunk_document(doc, "paragraph", target=20, overlap=6)
+    assert len(chunks) >= 2
+    assert chunks[1].span_start < chunks[0].span_end
+    assert all(c.span_start in starts and c.span_end in ends for c in chunks)
 
 
 def test_merge_text_uses_heading():

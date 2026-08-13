@@ -30,6 +30,9 @@ from pathlib import Path
 import fitz
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.services.page_cleaner import clean_page_texts
 NOTES_DIR = PROJECT_ROOT / "csc_notes"
 MANIFEST_PATH = NOTES_DIR / "library_metadata.json"
 
@@ -152,13 +155,10 @@ def http_get(url: str) -> bytes:
 
 def pdf_to_md(pdf_bytes: bytes) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    pages = []
-    for i, page in enumerate(doc, start=1):
-        text = page.get_text("text")
-        if text.strip():
-            pages.append(f"[[PAGE {i}]]\n\n{text}")
+    page_texts = [(i, page.get_text("text")) for i, page in enumerate(doc, start=1)]
     doc.close()
-    return "\n\n".join(pages)
+    cleaned = clean_page_texts(page_texts)
+    return "\n\n".join(f"[[PAGE {i}]]\n\n{text}" for i, text in cleaned)
 
 
 def handle_pdf(source: dict, manifest: list[dict]) -> None:

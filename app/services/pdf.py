@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import io
 import json
 import os
@@ -5,10 +7,12 @@ import re
 import time
 
 import fitz
-from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from app.core.config import PROJECT_ROOT, settings
 from app.services.elasticsearch import es_service
+
+_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
 
 
 class PdfService:
@@ -32,14 +36,14 @@ class PdfService:
             oldest = min(self._cache, key=lambda k: self._cache[k][0])
             self._cache.pop(oldest, None)
 
-    def serve(self, paper_id: str, chunk_id: str | None = None) -> Response:
+    def serve(self, paper_id: str, chunk_id: str | None = None, range_header: str | None = None) -> Response:
         notes_entry = self._find_notes_entry(paper_id)
         if notes_entry is None:
             raise FileNotFoundError(f"Note '{paper_id}' not found in the notes manifest.")
 
         local_path = self.local_pdf_path(paper_id)
         if local_path:
-            return self._serve_note_pdf(local_path, chunk_id)
+            return self._serve_note_pdf(local_path, chunk_id, range_header)
         if notes_entry.get("url"):
             return RedirectResponse(notes_entry["url"], status_code=302)
         raise FileNotFoundError(f"Note '{paper_id}' has no local PDF or source URL.")
@@ -47,7 +51,7 @@ class PdfService:
     def _plain_response(self, local_path: str) -> Response:
         return FileResponse(local_path, media_type="application/pdf", headers={"Content-Disposition": "inline"})
 
-    def _serve_note_pdf(self, pdf_path: str, chunk_id: str | None = None) -> Response:
+    def _serve_note_pdf(self, pdf_path: str, chunk_id: str | None = None, range_header: str | None = None) -> Response:
         if not os.path.isabs(pdf_path):
             pdf_path = os.path.join(PROJECT_ROOT, pdf_path)
         if not os.path.exists(pdf_path):
@@ -56,29 +60,81 @@ class PdfService:
             return self._plain_response(pdf_path)
 
         cache_key = f"note:{pdf_path}:{chunk_id}"
-        cached = self._get_cached(cache_key)
-        if cached is not None:
-            return self._stream_pdf(cached)
+        data = self._get_cached(cache_key)
+        if data is None:
+            try:
+                data = self._build_highlighted_pdf(pdf_path, chunk_id)
+            except Exception:
+                data = None
+            if data is None:
+                data = self._raw_pdf_bytes(pdf_path)
+            self._set_cached(cache_key, data)
+        return self._serve_bytes(data, range_header)
 
+    def _build_highlighted_pdf(self, pdf_path: str, chunk_id: str) -> bytes | None:
+        """Return a re-serialized PDF with highlights, or None if no highlight
+        could be placed (then the pristine file is served instead).
+
+        The scan window comes from the chunk's own page span (plus a small
+        margin) so the fallback never sweeps a whole multi-hundred-page book,
+        which was the source of the multi-second first load.
+        """
         try:
             source = es_service.client.get(index=self.index_name, id=chunk_id)["_source"]
-            doc = fitz.open(pdf_path)
-            page_num = source.get("page_number", 1)
-            if not self._highlight_by_search(doc, source["text"], page_num, all_pages=False):
-                self._highlight_by_search(doc, source["text"], page_num=1, all_pages=True)
+        except Exception:
+            return None
+
+        doc = fitz.open(pdf_path)
+        try:
+            page_start = int(source.get("page_start") or source.get("page_number") or 1)
+            page_end = int(source.get("page_end") or page_start)
+            matches = self._highlight_by_search(doc, source["text"], range(max(0, page_start - 2), min(len(doc), page_end + 2)))
+            if matches == 0:
+                matches = self._highlight_by_search(doc, source["text"], range(max(0, page_start - 6), min(len(doc), page_end + 6)))
+            if matches == 0:
+                return None
 
             buffer = io.BytesIO()
             doc.save(buffer)
+            return buffer.getvalue()
+        finally:
             doc.close()
-            buffer.seek(0)
-            data = buffer.getvalue()
-            self._set_cached(cache_key, data)
-            return self._stream_pdf(data)
-        except Exception:
-            return self._plain_response(pdf_path)
 
-    def _stream_pdf(self, data: bytes) -> Response:
-        return StreamingResponse(io.BytesIO(data), media_type="application/pdf", headers={"Content-Disposition": "inline"})
+    def _raw_pdf_bytes(self, pdf_path: str) -> bytes:
+        cache_key = f"raw:{pdf_path}"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+        with open(pdf_path, "rb") as f:
+            data = f.read()
+        self._set_cached(cache_key, data)
+        return data
+
+    def _serve_bytes(self, data: bytes, range_header: str | None) -> Response:
+        headers = {
+            "Content-Disposition": "inline",
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=300",
+            "ETag": f'"{hashlib.md5(data).hexdigest()}"',
+        }
+        if range_header:
+            match = _RANGE_RE.match(range_header.strip())
+            if match:
+                total = len(data)
+                start_s, end_s = match.group(1), match.group(2)
+                if start_s == "":
+                    suffix = int(end_s) if end_s else 0
+                    start, end = max(0, total - suffix), total - 1
+                else:
+                    start = int(start_s)
+                    end = int(end_s) if end_s else total - 1
+                start = min(start, total)
+                end = min(end, total - 1)
+                if start > end or start >= total:
+                    return Response(status_code=416, headers={"Content-Range": f"bytes */{total}"})
+                headers["Content-Range"] = f"bytes {start}-{end}/{total}"
+                return Response(content=data[start : end + 1], status_code=206, media_type="application/pdf", headers=headers)
+        return Response(content=data, media_type="application/pdf", headers=headers)
 
     def _notes_pdf_path(self, paper_id: str) -> str | None:
         """Find a local PDF for a note even when the manifest lacks pdf_path."""
@@ -105,6 +161,38 @@ class PdfService:
     def has_local_pdf(self, paper_id: str) -> bool:
         return self.local_pdf_path(paper_id) is not None
 
+    def render_page_images(self, paper_id: str, pages: list[int], dpi: int = 110) -> list[dict]:
+        """Render PDF pages of a note as base64 PNG data-URIs for a vision model.
+
+        Pages are 1-based and clamped to the document length. If a page cannot be
+        rasterized, its extracted text is returned instead so the caller can fall
+        back to text. Returns a list of {"page", "image"|None, "text"}."""
+        local_path = self.local_pdf_path(paper_id)
+        if not local_path:
+            return []
+        cache_key = f"{paper_id}:{tuple(sorted(set(pages)))}:{dpi}"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+        doc = fitz.open(local_path)
+        try:
+            n_pages = doc.page_count
+            page_nums = sorted({max(1, min(int(raw), n_pages)) for raw in pages})
+            results = []
+            for page_num in page_nums:
+                page = doc[page_num - 1]
+                entry = {"page": page_num, "image": None, "text": page.get_text("text").strip()}
+                try:
+                    pix = page.get_pixmap(dpi=dpi)
+                    entry["image"] = "data:image/png;base64," + base64.b64encode(pix.tobytes("png")).decode()
+                except Exception:
+                    pass
+                results.append(entry)
+        finally:
+            doc.close()
+        self._set_cached(cache_key, results)
+        return results
+
     def _find_notes_entry(self, paper_id: str) -> dict | None:
         if not os.path.exists(self.notes_manifest_path):
             return None
@@ -126,7 +214,7 @@ class PdfService:
             None,
         )
 
-    def _highlight_by_search(self, doc: fitz.Document, chunk_text: str, page_num: int, all_pages: bool = False) -> int:
+    def _highlight_by_search(self, doc: fitz.Document, chunk_text: str, page_range: range) -> int:
         cleaned = re.sub(r"^(#.*\n|Source:.*\n)+", "", chunk_text)
         words = cleaned.split()
         phrases = []
@@ -136,11 +224,6 @@ class PdfService:
             phrase = " ".join(words[start : start + phrase_len])
             if len(phrase) > 5:
                 phrases.append(phrase)
-
-        if all_pages:
-            page_range = range(len(doc))
-        else:
-            page_range = range(max(0, page_num - 1), min(len(doc), page_num + 1))
 
         matches = 0
         for pg_idx in page_range:

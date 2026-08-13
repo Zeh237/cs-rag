@@ -295,6 +295,22 @@
                         </div>
 
                         <div class="chat-input-area">
+                            <div class="chat-mode-bar">
+                                <span class="chat-mode-label">Answer mode</span>
+                                <label class="chat-mode">
+                                    <input type="radio" name="answerMode" value="auto" checked>
+                                    <span>Auto</span>
+                                </label>
+                                <label class="chat-mode" id="researchModeLabel">
+                                    <input type="radio" name="answerMode" value="research">
+                                    <span>Research (vision)</span>
+                                </label>
+                                <label class="chat-mode">
+                                    <input type="radio" name="answerMode" value="chunks">
+                                    <span>Chunks (text)</span>
+                                </label>
+                                <span class="chat-mode-hint" id="chatModeHint"></span>
+                            </div>
                             <div class="chat-input-wrapper">
                                 <textarea id="questionInput" placeholder="Ask a question about your CS notes..." rows="1"></textarea>
                                 <button class="chat-send-btn" id="queryBtn" disabled aria-label="Send message">

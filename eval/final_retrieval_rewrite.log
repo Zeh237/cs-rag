@@ -1,0 +1,28 @@
+  evaluated 20/30
+metric    keyword   semantic  hybrid    hybrid+re 
+--------------------------------------------------
+map       0.3342    0.2286    0.2901    0.3075    
+mrr       0.5550    0.5034    0.5437    0.5975    
+p@1       0.5333    0.4333    0.5000    0.5333    
+p@3       0.2889    0.2222    0.2667    0.2889    
+p@5       0.2267    0.1533    0.1867    0.2067    
+p@10      0.1333    0.1000    0.1200    0.1200    
+ndcg@1    0.5333    0.4333    0.5000    0.5333    
+ndcg@3    0.3408    0.2683    0.3173    0.3449    
+ndcg@5    0.3919    0.2865    0.3429    0.3779    
+ndcg@10   0.4209    0.3212    0.3831    0.4036    
+r@1       0.1778    0.1444    0.1667    0.1778    
+r@3       0.2889    0.2222    0.2667    0.2889    
+r@5       0.3778    0.2556    0.3111    0.3444    
+r@10      0.4444    0.3333    0.4000    0.4000    
+
+Paired 95% bootstrap CIs for the difference (hybrid+rerank - other):
+  map    vs keyword      diff=-0.0267 [-0.1779, +0.1144]
+  map    vs semantic     diff=+0.0789 [-0.0425, +0.2059]
+  map    vs hybrid       diff=+0.0174 [-0.1204, +0.1519]
+  mrr    vs keyword      diff=+0.0425 [-0.1886, +0.2809]
+  mrr    vs semantic     diff=+0.0942 [-0.1300, +0.3186]
+  mrr    vs hybrid       diff=+0.0538 [-0.1686, +0.2833]
+  (*) the interval excludes zero, so the difference is significant.
+
+Per-query results written to eval/final_retrieval_rewrite_queries.csv

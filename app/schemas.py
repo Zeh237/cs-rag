@@ -83,6 +83,8 @@ class SourceHit(BaseModel):
     title: str | None = None
     anchor_chunk_id: str | None = None
     page_number: int = 1
+    page_start: int = 1
+    page_end: int = 1
     matching_score: float = 0.0
     source_url: str | None = None
     local_pdf: bool = False
@@ -93,3 +95,4 @@ class RagResponse(BaseModel):
     answer: str
     search_query: str | None = None
     sources: list[SourceHit] = Field(default_factory=list)
+    citations: list[dict] = Field(default_factory=list)

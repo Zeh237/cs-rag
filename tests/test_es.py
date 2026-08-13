@@ -86,6 +86,36 @@ def test_get_chunk_window_orders_neighbors():
     assert window == "first chunk\n\nsecond chunk\n\nthird chunk"
 
 
+def test_get_chunk_window_entries_returns_docs_with_pages():
+    docs = [
+        {"_id": "p_chunk_0", "_source": {"chunk_id": "p_chunk_0", "text": "a", "page_start": 1, "page_end": 1}},
+        {"_id": "p_chunk_1", "_source": {"chunk_id": "p_chunk_1", "text": "b", "page_start": 2, "page_end": 2}},
+        {"_id": "p_chunk_2", "_source": {"chunk_id": "p_chunk_2", "text": "c", "page_start": 4, "page_end": 5}},
+    ]
+    svc = _svc(docs)
+    entries = svc.get_chunk_window_entries("p_chunk_1", window_size=1)
+    assert [e["chunk_id"] for e in entries] == ["p_chunk_0", "p_chunk_1", "p_chunk_2"]
+    assert entries[2]["page_end"] == 5
+
+
+def test_get_chunk_window_entries_missing_id_returns_empty():
+    svc = _svc(_chunk_docs())
+    assert svc.get_chunk_window_entries("unknown_id", window_size=1) == []
+
+
+def test_search_pages_dedupes_and_sorts_by_page():
+    docs = [
+        {"_id": "a_chunk_0", "_source": {"chunk_id": "a_chunk_0", "paper_id": "a", "page_start": 3, "text": "hello foo world"}},
+        {"_id": "a_chunk_1", "_source": {"chunk_id": "a_chunk_1", "paper_id": "a", "page_start": 3, "text": "another foo"}},
+        {"_id": "a_chunk_2", "_source": {"chunk_id": "a_chunk_2", "paper_id": "a", "page_start": 7, "text": "baz foo"}},
+    ]
+    svc = _svc(docs)
+    results = svc.search_pages("a", "foo")
+    assert [r["page"] for r in results] == [3, 7]
+    assert results[0]["chunk_id"] == "a_chunk_0"
+    assert "hello foo world" in results[0]["snippet"]
+
+
 def test_get_chunk_window_missing_id_returns_empty():
     svc = _svc(_chunk_docs())
     assert svc.get_chunk_window("unknown_id", window_size=1) == ""

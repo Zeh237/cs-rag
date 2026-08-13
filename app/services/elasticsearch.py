@@ -14,11 +14,13 @@ _INDEX_MAPPING = {
             "category": {"type": "keyword"},
             "chunk_id": {"type": "keyword"},
             "page_number": {"type": "integer"},
+            "page_start": {"type": "integer"},
+            "page_end": {"type": "integer"},
             "text": {"type": "text"},
             "highlight_boxes": {"type": "object", "enabled": False},
             "source_url": {"type": "keyword"},
             "local_pdf": {"type": "boolean"},
-            "vector_embedding": {"type": "dense_vector", "dims": 384, "index": True, "similarity": "cosine"},
+            "vector_embedding": {"type": "dense_vector", "dims": 768, "index": True, "similarity": "cosine"},
             "span_start": {"type": "integer"},
             "span_end": {"type": "integer"},
             "strategy": {"type": "keyword"},
@@ -62,7 +64,7 @@ class ElasticsearchService:
             self.client.indices.delete(index=index)
 
     def keyword_search(self, query: str, limit: int = 5, index: str | None = None) -> list[dict]:
-        body = {"query": {"multi_match": {"query": query, "fields": ["text", "title^2"]}}}
+        body = {"query": {"multi_match": {"query": query, "fields": ["text", "title^3", "category^1.5"]}}}
         response = self.client.search(index=index or settings.INDEX_NAME, body=body, size=limit)
         return self._format_results(response, index=index)
 
@@ -90,7 +92,7 @@ class ElasticsearchService:
         index: str | None = None,
     ) -> list[dict]:
         target = index or settings.INDEX_NAME
-        candidates = max(limit * 4, 10)
+        candidates = max(limit * 6, 40)
         semantic_hits = self.semantic_search_cosine(query_vector, limit=candidates, index=target)
         keyword_hits = self.keyword_search(query, limit=candidates, index=target)
 
@@ -114,12 +116,43 @@ class ElasticsearchService:
         return ranked[:limit]
 
     def get_chunk_window(self, chunk_id: str, window_size: int = 1) -> str:
+        entries = self.get_chunk_window_entries(chunk_id, window_size)
+        return "\n\n".join(entry.get("text", "") for entry in entries)
+
+    def search_pages(self, paper_id: str, query: str, limit: int = 12) -> list[dict]:
+        """Page-level keyword search inside a single document.
+
+        Returns one entry per page (sorted by page) with a short text snippet and
+        the chunk id, for the vision research tool."""
+        body = {
+            "query": {
+                "bool": {
+                    "filter": [{"term": {"paper_id": paper_id}}],
+                    "must": [{"multi_match": {"query": query, "fields": ["text", "title^2"]}}],
+                }
+            }
+        }
+        response = self.client.search(index=settings.INDEX_NAME, body=body, size=limit)
+        by_page: dict[int, dict] = {}
+        for hit in response["hits"]["hits"]:
+            source = hit["_source"]
+            page = source.get("page_start") or source.get("page_number") or 1
+            if page in by_page:
+                continue
+            snippet = " ".join((source.get("text") or "").split())[:240]
+            by_page[page] = {"page": page, "snippet": snippet, "chunk_id": source.get("chunk_id")}
+        return [by_page[p] for p in sorted(by_page)]
+
+    def get_chunk_window_entries(self, chunk_id: str, window_size: int = 1) -> list[dict]:
+        """Return the anchor chunk plus up to `window_size` neighbors each side,
+        as full source documents (text + page fields), ordered by chunk index."""
         prefix, current_idx = self._parse_chunk_id(chunk_id)
         if prefix is None or current_idx is None:
             try:
-                return self.client.get(index=settings.INDEX_NAME, id=chunk_id)["_source"]["text"]
+                doc = self.client.get(index=settings.INDEX_NAME, id=chunk_id)["_source"]
+                return [doc] if doc else []
             except Exception:
-                return ""
+                return []
 
         start_idx = max(0, current_idx - window_size)
         end_idx = current_idx + window_size
@@ -128,10 +161,10 @@ class ElasticsearchService:
         try:
             response = self.client.mget(index=settings.INDEX_NAME, body={"ids": target_ids})
             chunks = [doc["_source"] for doc in response.get("docs", []) if doc.get("found")]
-            chunks.sort(key=lambda c: self._parse_chunk_id(c["chunk_id"])[1])
-            return "\n\n".join(chunk["text"] for chunk in chunks)
+            chunks.sort(key=lambda c: self._parse_chunk_id(c.get("chunk_id", ""))[1] or 0)
+            return chunks
         except Exception:
-            return ""
+            return []
 
     def _format_results(self, response: dict, index: str | None = None) -> list[dict]:
         from app.services.pdf import pdf_service
@@ -148,6 +181,8 @@ class ElasticsearchService:
                     "category": source.get("category"),
                     "chunk_id": source.get("chunk_id"),
                     "page_number": source.get("page_number", 1),
+                    "page_start": source.get("page_start") or source.get("page_number") or 1,
+                    "page_end": source.get("page_end") or source.get("page_start") or source.get("page_number") or 1,
                     "text": source.get("text"),
                     "source_url": source.get("source_url") or "",
                     "local_pdf": bool(source.get("local_pdf"))

@@ -38,6 +38,8 @@ def _fake_hits() -> list[dict]:
             "category": "Algorithms",
             "chunk_id": "p1_chunk_0",
             "page_number": 3,
+            "page_start": 3,
+            "page_end": 5,
             "text": "Recursion solves a problem by solving smaller instances of itself.",
             "source_url": "",
             "local_pdf": True,
@@ -50,6 +52,8 @@ def _fake_hits() -> list[dict]:
             "category": "Algorithms",
             "chunk_id": "p2_chunk_1",
             "page_number": 7,
+            "page_start": 7,
+            "page_end": 7,
             "text": "Sorting rearranges elements into a specified order.",
             "source_url": "https://example.org/sorting",
             "local_pdf": False,
@@ -71,7 +75,10 @@ def client(monkeypatch):
     monkeypatch.setattr(es_service, "keyword_search", lambda query, limit=5: _fake_hits())
     monkeypatch.setattr(es_service, "semantic_search_cosine", lambda *a, **k: _fake_hits())
     monkeypatch.setattr(es_service, "hybrid_search", lambda **k: _fake_hits())
-    monkeypatch.setattr(es_service, "get_chunk_window", lambda *a, **k: "windowed context text")
+    monkeypatch.setattr(es_service, "get_chunk_window_entries", lambda chunk_id, window_size=1: [
+        {"chunk_id": chunk_id, "title": "Notes", "paper_id": chunk_id.split("_")[0],
+         "text": "windowed context text", "page_start": 1, "page_end": 2}
+    ])
 
     history: dict[str, list[dict[str, str]]] = {}
 

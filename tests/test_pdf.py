@@ -23,23 +23,23 @@ class TestHighlightBySearch:
     def test_highlights_only_nearby_page(self, two_page_pdf):
         doc = fitz.open(str(two_page_pdf))
         svc = PdfService()
-        count = svc._highlight_by_search(doc, "Recursion is the strongest tool for divide", page_num=2)
+        count = svc._highlight_by_search(doc, "Recursion is the strongest tool for divide", page_range=range(1, 2))
         assert count > 0
         assert len(list(doc[1].annots())) > 0
         assert not list(doc[0].annots())
         doc.close()
 
-    def test_all_pages_mode(self, two_page_pdf):
+    def test_multi_page_range(self, two_page_pdf):
         doc = fitz.open(str(two_page_pdf))
         svc = PdfService()
-        count = svc._highlight_by_search(doc, "Recursion", page_num=1, all_pages=True)
+        count = svc._highlight_by_search(doc, "Recursion", page_range=range(0, 2))
         assert count >= 2
         doc.close()
 
     def test_no_match_returns_zero(self, two_page_pdf):
         doc = fitz.open(str(two_page_pdf))
         svc = PdfService()
-        assert svc._highlight_by_search(doc, "quantum chromodynamics forever and today", page_num=1) == 0
+        assert svc._highlight_by_search(doc, "quantum chromodynamics forever and today", page_range=range(0, 2)) == 0
         doc.close()
 
 
@@ -58,7 +58,7 @@ class TestManifestMatching:
 
 
 def test_stream_pdf_headers():
-    response = PdfService()._stream_pdf(b"%PDF-1.4 data")
+    response = PdfService()._serve_bytes(b"%PDF-1.4 data", range_header=None)
     assert response.headers["content-type"] == "application/pdf"
 
 
@@ -110,3 +110,31 @@ def test_notes_endpoint_highlights_on_serve(client, two_page_pdf, monkeypatch):
     out = fitz.open(stream=r.content, filetype="pdf")
     annotations = [a for p in out for a in (p.annots() or [])]
     assert annotations
+
+
+def test_render_page_images(tmp_path, monkeypatch):
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 72), "Page one alpha text.", fontsize=11)
+    doc.new_page().insert_text((72, 72), "Page two beta text.", fontsize=11)
+    pdf_path = tmp_path / "render.pdf"
+    doc.save(str(pdf_path))
+    doc.close()
+
+    notes_dir = tmp_path / "notes"
+    os.makedirs(notes_dir, exist_ok=True)
+    monkeypatch.setattr("app.core.config.settings.NOTES_DIR", str(notes_dir))
+    monkeypatch.setattr("app.core.config.settings.NOTES_MANIFEST", str(notes_dir / "library_metadata.json"))
+    dest = os.path.join(notes_dir, "render.pdf")
+    shutil.copy(str(pdf_path), dest)
+
+    manifest = [{"id": "r1", "title": "R", "authors": [], "category": "C", "local_path": dest, "pdf_path": dest}]
+    with open(notes_dir / "library_metadata.json", "w") as f:
+        json.dump(manifest, f)
+
+    svc = PdfService()
+    out = svc.render_page_images("r1", [1, 2, 99], dpi=80)
+    assert [o["page"] for o in out] == [1, 2]
+    assert out[0]["image"] and out[0]["image"].startswith("data:image/png;base64,")
+    assert "Page one alpha text." in out[0]["text"]
+
+    assert svc.render_page_images("unknown_paper", [1], dpi=80) == []

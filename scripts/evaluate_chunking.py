@@ -207,6 +207,27 @@ async def build_collected(
     return collected
 
 
+async def _windowed_context(hits: list[dict], window_size: int = 1) -> list[dict]:
+    """Expand each hit with its adjacent chunks (same paper), deduped, like
+    the production context builder in app/api/rag.py."""
+    seen: set[str] = set()
+    context: list[dict] = []
+    for hit in hits:
+        for doc in es_service.get_chunk_window_entries(hit["chunk_id"], window_size):
+            chunk_id = doc.get("chunk_id") or hit["chunk_id"]
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            context.append(
+                {
+                    "title": doc.get("title") or hit.get("title") or hit.get("paper_id") or "Notes",
+                    "chunk_id": chunk_id,
+                    "text": doc.get("text") or "",
+                }
+            )
+    return context
+
+
 async def grade_answers(
     entries: list[dict],
     indexes: list[str],
@@ -221,10 +242,7 @@ async def grade_answers(
         gold = entry["passage"]
         for index in indexes:
             hits = (await retrieve(index, entry["question"], top_k))["hybrid+rerank"]
-            context = [
-                {"title": h.get("title") or h.get("paper_id") or "Notes", "chunk_id": h.get("chunk_id"), "text": h["text"]}
-                for h in hits
-            ]
+            context = await _windowed_context(hits)
             answer = await llm_service.generate_response(entry["question"], context_chunks=context)
             score = await judge_score(entry["question"], gold, answer)
             scores[index].append(score)

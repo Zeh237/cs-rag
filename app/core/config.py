@@ -19,7 +19,13 @@ class Settings:
 
     LLM_API_BASE: str = os.getenv("LLM_API_BASE", "")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "")
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+
+    VISION_LLM_MODEL: str = os.getenv("VISION_LLM_MODEL", "")
+    RESEARCH_MAX_PAGES: int = int(os.getenv("RESEARCH_MAX_PAGES", "12"))
+    RESEARCH_DPI: int = int(os.getenv("RESEARCH_DPI", "110"))
+    RESEARCH_SEED_WINDOW: int = int(os.getenv("RESEARCH_SEED_WINDOW", "1"))
+    RESEARCH_TOP_K_DOCS: int = int(os.getenv("RESEARCH_TOP_K_DOCS", "1"))
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")
 
     REDIS_HOST: str = os.getenv("REDIS_HOST", "redis://localhost:6379/")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")

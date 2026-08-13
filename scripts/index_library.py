@@ -70,13 +70,17 @@ def build_actions(
 
         for idx, chunk in enumerate(chunks):
             chunk_id = f"{paper_id}_chunk_{idx}"
+            page_start = chunk.get("page_start") or chunk.get("page", 1) or 1
+            page_end = chunk.get("page_end") or page_start
             source = {
                 "paper_id": paper_id,
                 "title": meta.get("title") or file_path.stem,
                 "authors": meta.get("authors") or [],
                 "category": meta.get("category") or "Uncategorized",
                 "chunk_id": chunk_id,
-                "page_number": chunk.get("page", 1),
+                "page_number": page_start,
+                "page_start": page_start,
+                "page_end": page_end,
                 "text": chunk["text"],
                 "highlight_boxes": chunk.get("highlight_boxes", {}),
                 "source_url": meta.get("url") or "",

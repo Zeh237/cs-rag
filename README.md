@@ -12,6 +12,8 @@ The system generates an answer from those chunks.
 - Keyword search across the notes.
 - Semantic search across the notes.
 - Hybrid search that combines keyword and semantic retrieval.
+- Answers cite the exact pages they were read from, with clickable links that open the PDF at the cited page and highlight the chunk.
+- Broad topic questions retrieve context from multiple documents (grouped by note) so answers cover whole subjects, not single chapters.
 - A PDF viewer that highlights the source page of each result.
 - A chat interface with streaming answers.
 - A web user interface for search, chat, documents, and ingestion.
@@ -144,8 +146,8 @@ The app uses a bearer token for most requests. Register a user and log in to get
 | `GET` | `/api/v1/pdf/{paper_id}` | Open a PDF; use `?chunk_id=...` to highlight a chunk |
 | `GET` | `/search/keyword` | Keyword search (`?q=...&limit=5`) |
 | `GET` | `/search/semantic` | Semantic search (`?q=...&limit=5`) |
-| `GET` | `/rag/ask` | Ask a question (`?q=...&limit=2`) |
-| `GET` | `/rag/ask/stream` | Ask a question and stream the answer (`?q=...&chat_id=...`) |
+| `GET` | `/rag/ask` | Ask a question (`?q=...&limit=4&window_size=2`) |
+| `GET` | `/rag/ask/stream` | Ask a question and stream the answer (`?q=...&chat_id=...&limit=4&window_size=2`) |
 | `GET` | `/health` | Return the health of the services |
 
 ## Tests

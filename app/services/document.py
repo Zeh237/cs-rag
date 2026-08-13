@@ -4,6 +4,7 @@ import re
 import fitz
 
 from app.services.highlight import compute_highlight_boxes
+from app.services.page_cleaner import clean_markdown, clean_page_texts
 
 _BIBLIOGRAPHY_PATTERNS = [
     r"(?i)(?:\n|^|\s)References\b",
@@ -18,15 +19,9 @@ class DocumentProcessor:
             raise FileNotFoundError(file_path)
 
         doc = fitz.open(file_path)
-        page_texts = []
-        for page_num, page in enumerate(doc, start=1):
-            text = page.get_text("text")
-            if text.strip():
-                page_texts.append((page_num, text))
+        page_texts = [(page_num, page.get_text("text")) for page_num, page in enumerate(doc, start=1)]
         doc.close()
-
-        if not page_texts:
-            return []
+        page_texts = clean_page_texts(page_texts)
 
         word_pages = [(word, page_num) for page_num, text in page_texts for word in text.split()]
         word_pages = word_pages[: self._bibliography_cutoff(word_pages)]
@@ -43,6 +38,8 @@ class DocumentProcessor:
                     "text": " ".join(word for word, _ in chunk_slice),
                     "page": chunk_slice[0][1],
                     "pages": chunk_pages,
+                    "page_start": chunk_pages[0] if chunk_pages else 1,
+                    "page_end": chunk_pages[-1] if chunk_pages else 1,
                 }
             )
             if i + chunk_size >= len(word_pages):
@@ -68,6 +65,7 @@ class DocumentProcessor:
         return chunks
 
     def chunk_markdown(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> list[dict]:
+        text = clean_markdown(text)
         lines = text.splitlines()
         sections: list[tuple[str, list[tuple[str, int]]]] = []
         current_heading = "Introduction"
@@ -98,10 +96,19 @@ class DocumentProcessor:
             budget = chunk_size - heading_words if heading_words < chunk_size else chunk_size
             for token_chunk in self._split_word_tokens(tokens, budget, overlap):
                 words = [word for word, _ in token_chunk]
-                page = token_chunk[0][1] if token_chunk else 1
+                pages = sorted({page for _, page in token_chunk})
+                page_start = pages[0] if pages else 1
                 body = " ".join(words)
                 text_out = f"# {heading}\n\n{body}".strip() if heading_words else body
-                chunks.append({"text": text_out, "page": page})
+                chunks.append(
+                    {
+                        "text": text_out,
+                        "page": page_start,
+                        "page_start": page_start,
+                        "page_end": pages[-1] if pages else page_start,
+                        "pages": pages,
+                    }
+                )
         return chunks
 
     def _split_word_tokens(self, tokens: list[tuple[str, int]], chunk_size: int, overlap: int) -> list[list[tuple[str, int]]]:

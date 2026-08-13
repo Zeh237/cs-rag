@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import auth, chats, ingest, rag, search
+from app.core.config import settings
 from app.db.session import init_db
 from app.services.elasticsearch import es_service
 from app.services.memory import memory_store
@@ -33,7 +34,15 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health_check():
-        return {"status": "ok", "elasticsearch": es_service.verify_connection()}
+        return {
+            "status": "ok",
+            "elasticsearch": es_service.verify_connection(),
+            "llm_enabled": bool(settings.LLM_API_BASE and settings.LLM_MODEL),
+            "llm_model": settings.LLM_MODEL,
+            "vision_enabled": bool(settings.VISION_LLM_MODEL and settings.LLM_API_BASE),
+            "vision_model": settings.VISION_LLM_MODEL,
+            "embedding_model": settings.EMBEDDING_MODEL,
+        }
 
     if os.path.isdir(STATIC_DIR):
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
