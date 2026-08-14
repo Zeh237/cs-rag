@@ -31,7 +31,11 @@ def _read_manifest() -> list[dict]:
 def _process_document(paper_id: str, local_path: str, ext: str, meta: dict) -> dict:
     try:
         if ext == ".pdf":
-            chunks = document_processor.chunk_pdf(local_path)
+            if meta.get("use_vision"):
+                import asyncio
+                chunks = asyncio.run(document_processor.chunk_pdf_vision(local_path))
+            else:
+                chunks = document_processor.chunk_pdf(local_path)
         elif ext == ".md":
             with open(local_path, "r", encoding="utf-8", errors="ignore") as f:
                 chunks = document_processor.chunk_markdown(f.read())
@@ -76,6 +80,8 @@ def _process_document(paper_id: str, local_path: str, ext: str, meta: dict) -> d
         }
         if ext == ".pdf":
             entry["pdf_path"] = relative_path
+        if meta.get("use_vision"):
+            entry["use_vision"] = True
 
         manifest = _read_manifest()
         if not any(item.get("id") == paper_id for item in manifest):
@@ -103,6 +109,7 @@ async def ingest_document(
     primary_category: str = Form(...),
     all_categories: str = Form(...),
     url: str | None = Form(None),
+    use_vision: bool = Form(False),
 ):
     original_filename = os.path.basename(file.filename or "")
     ext = os.path.splitext(original_filename)[1].lower()
@@ -125,6 +132,7 @@ async def ingest_document(
         "primary_category": primary_category,
         "url": url or "",
         "original_filename": original_filename,
+        "use_vision": use_vision,
     }
     job_id = ingestion_manager.submit(_process_document, paper_id, local_path, ext, meta)
 

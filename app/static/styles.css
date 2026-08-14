@@ -597,6 +597,32 @@ body {
     letter-spacing: 0;
 }
 
+.checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.checkbox-field input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    transition: all var(--transition);
+}
+
+.checkbox-field label {
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+}
+
 /* ─── Misc helpers ─────────────────────────────────────────────────────────── */
 .source-meta {
     font-size: 0.78rem;

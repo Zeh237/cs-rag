@@ -141,3 +141,34 @@ class TestIngestWorker:
         manifest = json.load(open(os.path.join(os.environ["NOTES_DIR"], "library_metadata.json"), encoding="utf-8"))
         entry = next(e for e in manifest if e["id"] == "pidpdf")
         assert entry["pdf_path"] == entry["local_path"] and entry["pdf_path"].endswith(".pdf")
+
+    def test_process_document_vision_pdf(self, client, monkeypatch, tmp_path):
+        from app.services.elasticsearch import es_service
+        from app.services.llm import llm_service
+
+        recorded_transcriptions = []
+
+        async def fake_transcribe(image_data):
+            recorded_transcriptions.append(image_data)
+            return "Vision Transcribed Content"
+
+        monkeypatch.setattr(llm_service, "transcribe_page_image", fake_transcribe)
+        monkeypatch.setattr(es_service, "index_chunk", lambda cid, doc: None)
+        monkeypatch.setattr(es_service, "create_index_if_not_exists", lambda: None)
+        monkeypatch.setattr(es_service, "refresh_index", lambda: None)
+
+        pdf = _gen_pdf(tmp_path)
+        _process_document(
+            "pidvision",
+            pdf,
+            ".pdf",
+            {
+                "title": "Vision PDF",
+                "authors": [],
+                "primary_category": "A",
+                "url": "",
+                "use_vision": True,
+            },
+        )
+        assert len(recorded_transcriptions) == 1
+        assert recorded_transcriptions[0].startswith("data:image/png;base64,")

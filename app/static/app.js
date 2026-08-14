@@ -451,6 +451,7 @@ async function ingestFiles() {
     const primaryCategory = document.getElementById('ingestCategory')?.value.trim();
     const allCategories   = document.getElementById('ingestAllCategories')?.value.trim() || primaryCategory;
     const url             = document.getElementById('ingestUrl')?.value.trim() || '';
+    const useVision       = document.getElementById('ingestUseVision')?.checked || false;
 
     if (!title || !authors || !primaryCategory) {
         showIngestResult('Please fill in all required fields (Title, Authors, Category).', true);
@@ -469,6 +470,7 @@ async function ingestFiles() {
     formData.append('authors', authors);
     formData.append('primary_category', primaryCategory);
     formData.append('all_categories', allCategories);
+    formData.append('use_vision', useVision);
     if (url) formData.append('url', url);
 
     try {
@@ -502,6 +504,8 @@ async function ingestFiles() {
                     const el = document.getElementById(id);
                     if (el) el.value = '';
                 });
+                const visionEl = document.getElementById('ingestUseVision');
+                if (visionEl) visionEl.checked = false;
             } else {
                 showIngestResult(final.error || final.message || 'Ingestion failed', true);
             }

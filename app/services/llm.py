@@ -51,6 +51,39 @@ class LLMService:
         self.model_name = settings.LLM_MODEL
         self.vision_model_name = settings.VISION_LLM_MODEL or self.model_name
 
+    async def transcribe_page_image(self, image_data_uri: str) -> str:
+        prompt = (
+            "You are transcribing a single page from computer science course notes (algorithms, ML, OS, etc.). "
+            "Extract all substantive content: text, equations, algorithms, tables, figure descriptions, and code snippets. "
+            "Maintain structure (headings, bullet points, numbered lists) where possible. "
+            "\n\n"
+            "IMPORTANT — SKIP these pages entirely (return empty string): "
+            "Table of Contents, Index, Bibliography, References, Works Cited, "
+            "blank pages, cover pages, copyright pages, dedication pages. "
+            "Also ignore running headers/footers (page numbers, chapter titles repeated at top/bottom). "
+            "Do not include any introductory or conversational text. "
+            "If the page is substantive, transcribe/describe it directly. If it should be skipped, output exactly: [SKIP]"
+        )
+        payload = {
+            "model": self.vision_model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_data_uri}},
+                    ],
+                }
+            ],
+            "temperature": 0.0,
+            "stream": False,
+        }
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            response = await client.post(self.api_url, json=payload)
+            response.raise_for_status()
+            res_json = response.json()
+            return res_json["choices"][0]["message"]["content"].strip()
+
     async def rewrite_query_for_search(self, question: str, history: Optional[list[dict[str, str]]] = None) -> str:
         if history:
             summary = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history[-4:])

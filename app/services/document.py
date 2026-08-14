@@ -1,5 +1,7 @@
+import hashlib
 import os
 import re
+from pathlib import Path
 
 import fitz
 
@@ -52,6 +54,117 @@ class DocumentProcessor:
         doc.close()
 
         return chunks
+
+    async def chunk_pdf_vision(self, file_path: str, chunk_size: int = 1000, overlap: int = 200, use_cached: bool = True) -> list[dict]:
+        import base64
+        from app.services.llm import llm_service
+        from app.core.config import settings
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(file_path)
+
+        # Check cache first
+        if use_cached:
+            cached = self._load_vision_markdown_cache(file_path)
+            if cached is not None:
+                page_texts = cached
+                print(f"Loaded {len(page_texts)} pages from vision markdown cache")
+            else:
+                page_texts = await self._transcribe_pdf_pages(file_path)
+                self._save_vision_markdown_cache(file_path, page_texts)
+        else:
+            page_texts = await self._transcribe_pdf_pages(file_path)
+            self._save_vision_markdown_cache(file_path, page_texts)
+
+        page_texts = clean_page_texts(page_texts)
+
+        word_pages = [(word, page_num) for page_num, text in page_texts for word in text.split()]
+        word_pages = word_pages[: self._bibliography_cutoff(word_pages)]
+        if not word_pages:
+            return []
+
+        chunks = []
+        i = 0
+        while i < len(word_pages):
+            chunk_slice = word_pages[i : i + chunk_size]
+            chunk_pages = sorted({page for _, page in chunk_slice})
+            chunks.append(
+                {
+                    "text": " ".join(word for word, _ in chunk_slice),
+                    "page": chunk_slice[0][1],
+                    "pages": chunk_pages,
+                    "page_start": chunk_pages[0] if chunk_pages else 1,
+                    "page_end": chunk_pages[-1] if chunk_pages else 1,
+                }
+            )
+            if i + chunk_size >= len(word_pages):
+                break
+            i += chunk_size - overlap
+
+        doc = fitz.open(file_path)
+        for chunk in chunks:
+            chunk["highlight_boxes"] = compute_highlight_boxes(doc, chunk.pop("pages"), chunk["text"])
+        doc.close()
+
+        return chunks
+
+    def _vision_cache_path(self, file_path: str) -> Path:
+        pdf_hash = hashlib.md5(Path(file_path).read_bytes()).hexdigest()[:12]
+        cache_dir = Path(os.environ.get("NOTES_DIR", ".")) / "vision_markdown"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / f"{Path(file_path).stem}_{pdf_hash}.md"
+
+    def _save_vision_markdown_cache(self, file_path: str, page_texts: list[tuple[int, str]]) -> None:
+        cache_path = self._vision_cache_path(file_path)
+        md_content = "\n\n".join(f"[[PAGE {p}]]\n{t}" for p, t in page_texts if t and t.strip() != "[SKIP]")
+        cache_path.write_text(md_content, encoding="utf-8")
+        print(f"Saved vision markdown cache to {cache_path}")
+
+    def _load_vision_markdown_cache(self, file_path: str) -> list[tuple[int, str]] | None:
+        cache_path = self._vision_cache_path(file_path)
+        if not cache_path.exists():
+            return None
+        try:
+            content = cache_path.read_text(encoding="utf-8")
+            page_texts = []
+            for block in content.split("[[PAGE "):
+                if not block.strip():
+                    continue
+                page_match = re.match(r"(\d+)\]\]\n(.*)", block, re.DOTALL)
+                if page_match:
+                    page_num = int(page_match.group(1))
+                    text = page_match.group(2).strip()
+                    if text:
+                        page_texts.append((page_num, text))
+            return page_texts if page_texts else None
+        except Exception:
+            return None
+
+    async def _transcribe_pdf_pages(self, file_path: str) -> list[tuple[int, str]]:
+        import base64
+        from app.services.llm import llm_service
+        from app.core.config import settings
+
+        doc = fitz.open(file_path)
+        page_texts = []
+        n_pages = doc.page_count
+
+        for page_num in range(1, n_pages + 1):
+            page = doc[page_num - 1]
+            try:
+                pix = page.get_pixmap(dpi=settings.RESEARCH_DPI)
+                image_data = "data:image/png;base64," + base64.b64encode(pix.tobytes("png")).decode()
+                text = await llm_service.transcribe_page_image(image_data)
+            except Exception as e:
+                print(f"Vision transcription failed for page {page_num}: {e}. Falling back to standard text extraction.")
+                text = page.get_text("text")
+            if text.strip() == "[SKIP]":
+                print(f"Page {page_num} marked as skip by vision model")
+                continue
+            page_texts.append((page_num, text))
+
+        doc.close()
+        return page_texts
 
     def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> list[dict]:
         words = text.split()
