@@ -59,10 +59,11 @@ class LLMService:
             "\n\n"
             "IMPORTANT — SKIP these pages entirely (return empty string): "
             "Table of Contents, Index, Bibliography, References, Works Cited, "
-            "blank pages, cover pages, copyright pages, dedication pages. "
+            "blank pages, cover pages, dedication pages. "
             "Also ignore running headers/footers (page numbers, chapter titles repeated at top/bottom). "
             "Do not include any introductory or conversational text. "
             "If the page is substantive, transcribe/describe it directly. If it should be skipped, output exactly: [SKIP]"
+            "if a page has substantive content alongside anything that should be skipped, transcribe only the substantive content and ignore the rest."
         )
         payload = {
             "model": self.vision_model_name,
