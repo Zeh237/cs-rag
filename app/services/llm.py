@@ -64,6 +64,7 @@ class LLMService:
             "Do not include any introductory or conversational text. "
             "If the page is substantive, transcribe/describe it directly. If it should be skipped, output exactly: [SKIP]"
             "if a page has substantive content alongside anything that should be skipped, transcribe only the substantive content and ignore the rest."
+            "Keep headings and subheadings, but do not invent any headings that are not present on the page. these headings and subheadings should appear on a new line, and the text that follows should appear under it"
         )
         payload = {
             "model": self.vision_model_name,
