@@ -1,29 +1,24 @@
 # CSC RAG Engine
 
-This project answers questions about undergraduate computer science notes.
-It uses retrieval-augmented generation (RAG).
-It stores the notes as searchable chunks.
-You ask a question.
-The system retrieves the relevant chunks.
-The system generates an answer from those chunks.
+This project answers questions about undergraduate computer science notes using retrieval-augmented generation (RAG). Notes are stored as searchable chunks in Elasticsearch.
 
 ## Features
 
 - Keyword search across the notes.
 - Semantic search across the notes.
 - Hybrid search that combines keyword and semantic retrieval.
-- Answers cite the exact pages they were read from, with clickable links that open the PDF at the cited page and highlight the chunk.
+- Answers cite exact pages with clickable links that open the PDF at the cited position and highlight the chunk.
 - Broad topic questions retrieve context from multiple documents (grouped by note) so answers cover whole subjects, not single chapters.
-- A PDF viewer that highlights the source page of each result.
-- A chat interface with streaming answers.
-- A web user interface for search, chat, documents, and ingestion.
+- PDF viewer that highlights the source page of each result.
+- Chat interface with streaming answers.
+- Web user interface for search, chat, documents, and ingestion.
 
 ## Requirements
 
 - Python 3.11 or newer.
 - Elasticsearch 8.x. The system requires a running instance.
-- Redis. The system uses Redis for chat history. Redis is optional if you do not use the chat history.
-- A local OpenAI-compatible LLM server. The system uses this server to generate answers. Examples are LM Studio and Ollama. The LLM is optional if you only search.
+- Redis. The system uses Redis for chat history; Redis is optional if chat history is not used.
+- A local LLM server compatible with the OpenAI API. The system uses this server to generate answers. Examples are LM Studio and Ollama. The LLM is optional if only search is needed.
 
 ## Setup
 
@@ -33,7 +28,7 @@ The system generates an answer from those chunks.
    cp .env.example .env
    ```
 
-2. Edit the file `.env`. Set the connection data for Elasticsearch, Redis, and the LLM. Refer to the section "Configuration".
+2. Edit `.env`. Set the connection data for Elasticsearch, Redis, and the LLM. Refer to the "Configuration" section.
 
 3. Create a virtual environment:
 
@@ -74,9 +69,7 @@ The system does not contain notes by default. Use the scripts to fetch and index
    python scripts/fetch_notes.py
    ```
 
-   This script downloads open course notes as PDFs, stores each PDF locally in
-   `NOTES_DIR/pdfs/`, and normalizes its text into a Markdown file. Every note
-   therefore has a local PDF backing it.
+   This script downloads open course notes as PDFs, stores each PDF locally in `csc_notes/pdfs/`, and normalizes its text into a Markdown file. Every note therefore has a local PDF backing it.
 
 2. Index the notes into Elasticsearch:
 
@@ -93,7 +86,7 @@ The app reads all configuration from environment variables. The file `.env.examp
 Key variables:
 
 | Variable | Purpose | Default |
-| --- | --- | --- |
+|---|---|---|
 | `ES_HOST` | The URL of the Elasticsearch service | `http://localhost:9200` |
 | `ES_USER` | The Elasticsearch user name | `elastic` |
 | `ES_PASSWORD` | The Elasticsearch password | `password` |
@@ -133,7 +126,7 @@ curl http://localhost:8000/api/v1/ingest/status/JOB_ID
 The app uses a bearer token for most requests. Register a user and log in to get the token.
 
 | Method | URI | Purpose |
-| --- | --- | --- |
+|---|---|---|
 | `POST` | `/auth/register` | Register a user |
 | `POST` | `/auth/login` | Log in and get a token |
 | `GET` | `/auth/me` | Return the current user |
@@ -177,37 +170,68 @@ Then run the four retrieval pipelines (keyword, semantic, hybrid, hybrid + reran
 python scripts/evaluate_retrieval.py --dataset eval/dataset.jsonl --quick 0
 ```
 
-Use `--quick N` to run a sanity check on the first `N` queries, and `--include-neighbors` to switch between judging against the answer chunk only or the answer chunk plus its neighbors. The script prints metrics (`map`, `mrr`, `p@k`, `ndcg@k`, `r@k`), Per-query bootstrap-resampled 95% confidence intervals for the difference against the best method, and per-query results in `eval/results_queries.csv`.
+Use `--quick N` to run a sanity check on the first `N` queries, and `--include-neighbors` to switch between judging against the answer chunk only or the answer chunk plus its neighbors. The script prints metrics (`map`, `mrr`, `p@k`, `ndcg@k`, `r@k`), per-query bootstrap-resampled 95% confidence intervals for the difference against the best method, and per-query results in `eval/results_queries.csv`.
 
 ## Chunking-strategy evaluation
 
-Fixed-size, sentence-bundled, and paragraph-style chunking are compared on the same notes corpus. The corpus is parsed once into a shared word-index coordinate system (`app/services/chunking.py`); every chunk stores the word span it covers and the question dataset stores the gold-answer span, so the same questions are evaluated against every strategy without re-annotating. Questions are LLM-generated per paragraph (heuristic fallback when no LLM runs).
+The system supports five chunking strategies: fixed, recursive, semantic, document, and hierarchical. Each strategy produces chunks with word-span metadata, so the same question set can be evaluated against every strategy without re-annotating.
 
-1. Build the chunking-agnostic question set:
+### Strategies
 
-   ```bash
-   python scripts/build_chunk_eval_dataset.py --notes-dir ./csc_notes \
-       --out eval/chunk_dataset.jsonl --count 100 --seed 42
-   ```
+- **fixed** — Chunks of exactly `chunk-size` words with `overlap` word overlap between consecutive chunks. No section awareness.
+- **recursive** — RecursiveCharacterTextSplitter from LangChain. Splits on whitespace boundaries; does not guarantee sentence boundaries.
+- **semantic** — LlamaIndex SemanticChunker with `all-MiniLM-L6-v2` embeddings. Produces variable-sized chunks based on topic coherence.
+- **document** — Splits respect section boundaries (`#`-headers in Markdown). Each chunk stays within a single document section.
+- **hierarchical** — LlamaIndex HierarchicalNodeParser. Produces a coarse-to-fine hierarchy: parent chunks at 2× target size and child chunks at target size, linked by parent/child relationships.
 
-2. Index the same notes under the strategies (the current production chunker is `--strategy fixed --chunk-size 1000 --overlap 200`). By default the indexer keeps only notes that have a local PDF in `csc_notes/pdfs/` (pass `--no-require-pdf` to include PDF-less sources):
+### Comparison script
 
-   ```bash
-   python scripts/index_library.py --index csc_notes_fixed1000    --strategy fixed --chunk-size 1000 --overlap 200 --only-md
-   python scripts/index_library.py --index csc_notes_fixed300      --strategy fixed --chunk-size 300 --overlap 45 --only-md
-   python scripts/index_library.py --index csc_notes_sentence300   --strategy sentence --chunk-size 300 --overlap 45 --only-md
-   python scripts/index_library.py --index csc_notes_para          --strategy paragraph --chunk-size 300 --overlap 0 --only-md
-   ```
+Run the comparison on a markdown file or on notes from `csc_notes/`:
 
-3. Evaluate (add `--grade N` to run the LLM end-to-end answer pipeline on a sample and have a local LLM judge score each answer /5):
+```bash
+# Compare on the VLM markdown output from the PDF comparison:
+python eval/compare_chunk_strategies.py --file eval/method_A__VLM_(cached).md --target 300 --overlap 45
 
-   ```bash
-   python scripts/evaluate_chunking.py \
-       --indexes csc_notes_fixed1000,csc_notes_fixed300,csc_notes_sentence300,csc_notes_para \
-       --dataset eval/chunk_dataset.jsonl --overlap-ratio 0.5 --grade 4
-   ```
+# Compare on a sample of notes (default: 1 small, 1 medium, 1 large):
+python eval/compare_chunk_strategies.py --target 300 --overlap 45
+```
 
-A retrieved chunk is judged relevant when its span overlaps at least `--overlap-ratio` of the gold paragraph. The report also prints the "single-chunk containment" share — how often a whole paragraph fits in one chunk per strategy — which is the structural limit on answer quality.
+Outputs are saved to `eval/`:
+
+- `chunk_strategy_<strategy>.md` — full chunk listing per strategy for human inspection
+- `chunk_comparison_results.json` — raw per-note and aggregate data
+- `chunk_comparison_report.md` — markdown table and metric explanations
+
+### Indexing the strategies
+
+Index the same notes under each strategy, then evaluate retrieval quality:
+
+```bash
+python scripts/index_library.py --index csc_notes_fixed300 \
+    --strategy fixed --chunk-size 300 --overlap 45 --only-md
+
+python scripts/index_library.py --index csc_notes_recursive300 \
+    --strategy recursive --chunk-size 300 --overlap 45 --only-md
+
+python scripts/index_library.py --index csc_notes_semantic300 \
+    --strategy semantic --chunk-size 300 --overlap 45 --only-md
+
+python scripts/index_library.py --index csc_notes_document300 \
+    --strategy document --chunk-size 300 --overlap 45 --only-md
+
+python scripts/index_library.py --index csc_notes_hierarchical300 \
+    --strategy hierarchical --chunk-size 300 --overlap 45 --only-md
+```
+
+Then evaluate:
+
+```bash
+python scripts/evaluate_chunking.py \
+    --indexes csc_notes_fixed300,csc_notes_recursive300,csc_notes_semantic300,csc_notes_document300,csc_notes_hierarchical300 \
+    --dataset eval/chunk_dataset_v2.jsonl --overlap-ratio 0.5
+```
+
+A retrieved chunk is judged relevant when its stored word span overlaps the gold answer paragraph by at least `--overlap-ratio`. The report also prints the "single-chunk containment" share — how often a whole paragraph fits in one chunk per strategy — which is the structural limit on answer quality.
 
 ## Directory layout
 
