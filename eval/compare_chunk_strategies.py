@@ -1,0 +1,329 @@
+"""Compare chunking strategies on real notes, mirroring compare_pdf_methods.py.
+
+This script:
+  1. Parses a sample of markdown notes (or specific ones)
+  2. Runs each chunking strategy (fixed, recursive, semantic, document, hierarchical)
+  3. Computes automated checks/metrics on each strategy's chunks
+  4. Saves each strategy's chunks to eval/chunk_strategy_*.md for human inspection
+  5. Produces eval/chunk_comparison_results.json and eval/chunk_comparison_report.md
+
+Usage:
+    python eval/compare_chunk_strategies.py --target 300 --overlap 45
+    python eval/compare_chunk_strategies.py --notes ch01.md,ch02.md --target 200
+"""
+
+import argparse
+import json
+import re
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.services.chunking import (  # noqa: E402
+    CHUNK_STRATEGIES,
+    chunk_document,
+    parse_document,
+)
+
+NOTES_DIR = Path("csc_notes")
+EVAL_DIR = Path("eval")
+
+
+# ---------------------------------------------------------------------------
+# Sentence boundary detection (word level)
+# ---------------------------------------------------------------------------
+_SENT_END_RE = re.compile(r"[.!?][\"')\]}]*$")
+_ABBREV = {
+    "mr.", "mrs.", "ms.", "dr.", "prof.", "st.", "vs.", "e.g.", "i.e.",
+    "et", "al.", "fig.", "eq.", "no.", "sec.", "pp.", "vol.", "ch.", "p.",
+}
+
+
+def _word_ends_sentence(word: str) -> bool:
+    if not word:
+        return False
+    low = word.lower()
+    if low in _ABBREV or low.rstrip(")\"'.") in _ABBREV:
+        return False
+    return bool(_SENT_END_RE.search(word))
+
+
+def sentence_boundaries(words: list[str]) -> set[int]:
+    """Word indexes that are the last word of a sentence (exclusive end indexes)."""
+    ends = set()
+    for i, word in enumerate(words):
+        if _word_ends_sentence(word):
+            ends.add(i + 1)
+    return ends
+
+
+# ---------------------------------------------------------------------------
+# Running a single strategy on one note
+# ---------------------------------------------------------------------------
+def run_strategy_on_note(doc, strategy: str, target: int, overlap: int):
+    start = time.time()
+    chunks = chunk_document(doc, strategy, target=target, overlap=overlap)
+    elapsed = time.time() - start
+    return chunks, elapsed
+
+
+def chunk_metrics(doc, chunks, strategy: str, target: int, overlap: int) -> dict:
+    """Compute automated checks/metrics for one strategy's chunks on one note."""
+    words = doc.words
+    total_words = len(words)
+    sizes = [c.span_end - c.span_start for c in chunks]
+
+    # coverage: fraction of words covered by at least one chunk
+    covered = set()
+    for c in chunks:
+        covered.update(range(c.span_start, c.span_end))
+    coverage = 100.0 * len(covered) / total_words if total_words else 0.0
+
+    # section boundaries (word indexes that start a new section)
+    section_starts = set()
+    for sec in doc.sections:
+        if sec.paragraphs:
+            section_starts.add(sec.paragraphs[0].start)
+
+    # sentence ends
+    sent_ends = sentence_boundaries(words)
+
+    # per-chunk checks
+    num_cross_section = 0
+    num_cut_sentence = 0
+    num_cut_paragraph = 0
+    for c in chunks:
+        # crosses a section boundary?
+        crosses_section = any(
+            section_starts and s > c.span_start and s < c.span_end for s in section_starts
+        )
+        if crosses_section:
+            num_cross_section += 1
+
+        # starts/ends mid-sentence (not at a sentence end, not at doc edge,
+        # and not at a section start)
+        if c.span_start > 0 and c.span_start not in sent_ends and c.span_start not in section_starts:
+            num_cut_sentence += 1
+
+        # starts/ends mid-paragraph
+        para_boundaries = set()
+        for sec in doc.sections:
+            for p in sec.paragraphs:
+                para_boundaries.add(p.start)
+                para_boundaries.add(p.end)
+        if c.span_start > 0 and c.span_start not in para_boundaries:
+            num_cut_paragraph += 1
+
+    n = len(chunks)
+    return {
+        "strategy": strategy,
+        "num_chunks": n,
+        "avg_size": round(sum(sizes) / n, 1) if n else 0.0,
+        "max_size": max(sizes) if sizes else 0,
+        "min_size": min(sizes) if sizes else 0,
+        "coverage_pct": round(coverage, 1),
+        "cross_section": num_cross_section,
+        "cut_sentence_pct": round(100.0 * num_cut_sentence / n, 1) if n else 0.0,
+        "cut_paragraph_pct": round(100.0 * num_cut_paragraph / n, 1) if n else 0.0,
+        "span_valid": all(c.span_end > c.span_start for c in chunks),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Human-inspection dumps
+# ---------------------------------------------------------------------------
+def dump_strategy(chunks_per_note, strategy: str, note_names: list[str], md_path: Path) -> None:
+    lines = [
+        "# Strategy: %s" % strategy,
+        "",
+        "**Generated by:** `eval/compare_chunk_strategies.py`",
+        "",
+    ]
+    for note in note_names:
+        chunks = chunks_per_note.get(note, [])
+        lines.append("")
+        lines.append("## %s (%d chunks)" % (note, len(chunks)))
+        lines.append("")
+        for i, c in enumerate(chunks, start=1):
+            lines.append("### Chunk %d  —  words [%d, %d)  —  heading: `%s`" % (
+                i, c.span_start, c.span_end, c.heading))
+            lines.append("")
+            lines.append("```")
+            lines.append(c.text)
+            lines.append("```")
+            lines.append("")
+    md_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def select_notes(args) -> list[tuple[Path, str]]:
+    """Return a list of (path, display_name) to evaluate."""
+    if args.file:
+        entries = []
+        for raw in [f.strip() for f in args.file.split(",") if f.strip()]:
+            p = Path(raw)
+            if not p.exists():
+                print("File not found: %s" % raw, file=sys.stderr)
+                sys.exit(1)
+            entries.append((p, p.name))
+        if not entries:
+            print("No files given with --file.", file=sys.stderr)
+            sys.exit(1)
+        return entries
+
+    if args.notes:
+        names = [n.strip() for n in args.notes.split(",") if n.strip()]
+        entries = []
+        for name in names:
+            p = NOTES_DIR / name
+            if p.suffix != ".md":
+                p = p.with_suffix(".md")
+            if not p.exists():
+                # try to find a partial match
+                matches = sorted(NOTES_DIR.glob("*" + name + "*.md"))
+                if matches:
+                    p = matches[0]
+            if p.exists():
+                entries.append((p, p.name))
+        if not entries:
+            print("No matching notes found for: %s" % args.notes, file=sys.stderr)
+            sys.exit(1)
+        return entries
+
+    # default sample: 1 small, 1 medium, 1 large representative note,
+    # skipping near-empty files that skew the aggregate metrics
+    files = [p for p in NOTES_DIR.glob("*.md") if p.stat().st_size > 2000]
+    if len(files) <= 3:
+        return [(f, f.name) for f in files]
+    by_size = sorted(files, key=lambda p: p.stat().st_size)
+    picked = [by_size[0], by_size[len(by_size) // 2], by_size[-1]]
+    return [(p, p.name) for p in picked]
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Compare chunking strategies on real notes.")
+    parser.add_argument("--target", type=int, default=300)
+    parser.add_argument("--overlap", type=int, default=45)
+    parser.add_argument("--file", default="", help="Comma-separated markdown file paths to evaluate (e.g. the VLM output).")
+    parser.add_argument("--notes", default="", help="Comma-separated note names (default: sample).")
+    parser.add_argument("--strategies", default="", help="Comma-separated subset of %s." % (", ".join(CHUNK_STRATEGIES)))
+    args = parser.parse_args()
+
+    EVAL_DIR.mkdir(parents=True, exist_ok=True)
+    strategies = [s.strip() for s in args.strategies.split(",") if s.strip()] or list(CHUNK_STRATEGIES)
+    for s in strategies:
+        if s not in CHUNK_STRATEGIES:
+            print("Unknown strategy: %s (choices: %s)" % (s, ", ".join(CHUNK_STRATEGIES)), file=sys.stderr)
+            sys.exit(1)
+
+    note_entries = select_notes(args)
+    note_names = [name for _, name in note_entries]
+    print("Notes: %s" % ", ".join(note_names))
+
+    # accumulate per-strategy results across notes
+    aggregate: dict[str, list] = {s: [] for s in strategies}
+    per_strategy_chunks: dict[str, dict[str, list]] = {s: {} for s in strategies}
+    per_note_chunks: dict[str, dict[str, list]] = {n: {} for n in note_names}
+
+    for path, note in note_entries:
+        print("\n=== %s ===" % note)
+        text = path.read_text(encoding="utf-8")
+        doc = parse_document(text)
+        print("  total words: %d" % len(doc.words))
+        for strategy in strategies:
+            chunks, elapsed = run_strategy_on_note(doc, strategy, args.target, args.overlap)
+            metrics = chunk_metrics(doc, chunks, strategy, args.target, args.overlap)
+            metrics["note"] = note
+            metrics["elapsed"] = round(elapsed, 2)
+            aggregate[strategy].append(metrics)
+            per_strategy_chunks[strategy][note] = chunks
+            per_note_chunks[note][strategy] = chunks
+            print("  %-13s %3d chunks  avg %6.1f  max %5d  coverage %5.1f%%  cross-sect %d  cut-sent %4.1f%%  %.2fs" % (
+                strategy, metrics["num_chunks"], metrics["avg_size"], metrics["max_size"],
+                metrics["coverage_pct"], metrics["cross_section"],
+                metrics["cut_sentence_pct"], metrics["elapsed"]))
+
+    # Save per-strategy dumps for human inspection
+    print("\n--- Saving strategy dumps ---")
+    for strategy in strategies:
+        path = EVAL_DIR / ("chunk_strategy_%s.md" % strategy)
+        dump_strategy(per_strategy_chunks[strategy], strategy, note_names, path)
+        print("  saved %s" % path)
+
+    # Aggregate per-strategy summary
+    summary = {}
+    for strategy in strategies:
+        rows = aggregate[strategy]
+        n_notes = len(rows)
+        num_chunks = sum(r["num_chunks"] for r in rows)
+        total_cross = sum(r["cross_section"] for r in rows)
+        def mean(key):
+            return round(sum(r[key] for r in rows) / n_notes, 1) if n_notes else 0.0
+        summary[strategy] = {
+            "total_chunks": num_chunks,
+            "avg_chunks_per_note": round(num_chunks / n_notes, 1) if n_notes else 0,
+            "avg_avg_size": mean("avg_size"),
+            "max_max_size": max(r["max_size"] for r in rows) if rows else 0,
+            "min_min_size": min(r["min_size"] for r in rows) if rows else 0,
+            "avg_coverage_pct": mean("coverage_pct"),
+            "total_cross_section": total_cross,
+            "avg_cut_sentence_pct": mean("cut_sentence_pct"),
+            "avg_cut_paragraph_pct": mean("cut_paragraph_pct"),
+            "all_spans_valid": all(r["span_valid"] for r in rows),
+            "avg_elapsed": mean("elapsed"),
+        }
+
+    json_out = EVAL_DIR / "chunk_comparison_results.json"
+    json_out.write_text(json.dumps({
+        "config": {"target": args.target, "overlap": args.overlap, "notes": note_names},
+        "per_note": aggregate,
+        "summary": summary,
+    }, indent=2), encoding="utf-8")
+    print("\n**JSON results saved to:** `%s`" % json_out)
+
+    # Markdown report
+    lines = [
+        "# Chunking Strategy Comparison",
+        "",
+        "**Config:** target=%d words, overlap=%d" % (args.target, args.overlap),
+        "**Notes:** %s" % ", ".join(note_names),
+        "",
+        "## Summary",
+        "",
+        "| Strategy | Total chunks | Avg/note | Avg size | Max size | Min size | Coverage %% | Cross-section | Cut-sentence %% | Cut-paragraph %% | Valid spans | Time (s) |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for strategy in strategies:
+        s = summary[strategy]
+        lines.append("| %s | %d | %.1f | %.1f | %d | %d | %.1f | %d | %.1f | %.1f | %s | %.2f |" % (
+            strategy, s["total_chunks"], s["avg_chunks_per_note"], s["avg_avg_size"],
+            s["max_max_size"], s["min_min_size"], s["avg_coverage_pct"],
+            s["total_cross_section"], s["avg_cut_sentence_pct"], s["avg_cut_paragraph_pct"],
+            "Yes" if s["all_spans_valid"] else "No", s["avg_elapsed"]))
+    lines.append("")
+    lines.append("## What each metric means")
+    lines.append("- **Coverage %**: fraction of the document's words covered by at least one chunk (100%% = nothing lost).")
+    lines.append("- **Cross-section**: number of chunks whose span bridges two `#`-section boundaries. `document` and `hierarchical` should be 0.")
+    lines.append("- **Cut-sentence %**: share of chunks that start in the middle of a sentence (sentence-end detection is heuristic).")
+    lines.append("- **Cut-paragraph %**: share of chunks that start mid-paragraph. `document` should be lowest.")
+    lines.append("- **Valid spans**: all chunks have `span_end > span_start`.")
+    lines.append("")
+    lines.append("**Per-note details** are in `eval/chunk_comparison_results.json`; full text dumps per strategy are in `eval/chunk_strategy_*.md`.")
+    lines.append("")
+    lines.append("**Files saved**")
+    lines.append("- `eval/chunk_strategy_*.md` — full chunk listing per strategy (human inspection)")
+    lines.append("- `eval/chunk_comparison_results.json` — raw per-note + summary data")
+    lines.append("- `eval/chunk_comparison_report.md` — this markdown report")
+    lines.append("")
+    lines.append("**Markdown report saved to:** `eval/chunk_comparison_report.md`")
+    report = "\n".join(lines)
+    (EVAL_DIR / "chunk_comparison_report.md").write_text(report, encoding="utf-8")
+    print(report)
+
+
+if __name__ == "__main__":
+    main()
