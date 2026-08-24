@@ -5,7 +5,6 @@ import httpx
 
 from app.core.config import settings
 
-
 _RESEARCH_TOOLS = [
     {
         "type": "function",
@@ -43,7 +42,6 @@ _RESEARCH_TOOLS = [
         },
     },
 ]
-
 
 class LLMService:
     def __init__(self) -> None:
@@ -236,7 +234,7 @@ class LLMService:
             elif img.get("text"):
                 content.append({"type": "text", "text": f"Page {img['page']} text: {img['text'][:600]}"})
         if not any(part.get("type") == "image_url" for part in content):
-            return  # nothing readable
+            return
 
         messages: list[dict] = [{"role": "system", "content": system}]
         if history:
@@ -296,7 +294,7 @@ class LLMService:
                 return
 
             if not acc:
-                return  # finish_reason stop: final text already streamed
+                return
 
             assistant_msg: dict = {"role": "assistant", "content": None, "tool_calls": []}
             for idx in sorted(acc):
@@ -379,6 +377,5 @@ class LLMService:
                     messages.append({"role": "tool", "tool_call_id": tc_id, "content": "Unknown tool."})
 
         yield "\n\n[Reached the tool-use limit; answer may be truncated.]"
-
 
 llm_service = LLMService()

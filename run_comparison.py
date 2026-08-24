@@ -11,7 +11,6 @@ eval_dir.mkdir(exist_ok=True)
 
 methods_data = {}
 
-# --- Method B: fitz raw ---
 start = time.time()
 doc = fitz.open(PDF_PATH)
 chunks_b = []
@@ -39,7 +38,6 @@ results_b = {
 methods_data["B. fitz raw"] = {"elapsed": elapsed_b, "rating": results_b, "md_content": text_b}
 print("B. fitz raw: elapsed=%.2f, score=%.1f%%" % (elapsed_b, results_b["score_pct"]))
 
-# --- Method C: fitz + clean ---
 start = time.time()
 doc = fitz.open(PDF_PATH)
 page_texts = [(page_num, page.get_text("text")) for page_num, page in enumerate(doc, start=1)]
@@ -69,7 +67,6 @@ results_c = {
 methods_data["C. fitz + clean"] = {"elapsed": elapsed_c, "rating": results_c, "md_content": text_c}
 print("C. fitz + clean: elapsed=%.2f, score=%.1f%%" % (elapsed_c, results_c["score_pct"]))
 
-# --- Method D: plain text ---
 start = time.time()
 doc = fitz.open(PDF_PATH)
 raw_texts = []
@@ -101,13 +98,11 @@ results_d = {
 methods_data["D. Plain text"] = {"elapsed": elapsed_d, "rating": results_d, "md_content": text_d}
 print("D. Plain text: elapsed=%.2f, score=%.1f%%" % (elapsed_d, results_d["score_pct"]))
 
-# --- Save markdown files ---
 for name, data in methods_data.items():
     md_path = eval_dir / ("method_%s.md" % name.replace(".", "_").replace(" ", "_"))
     md_path.write_text(data["md_content"], encoding="utf-8")
     print("Saved: %s (%d chars)" % (md_path, len(data["md_content"])))
 
-# --- Save JSON results ---
 results_out = {}
 for name, data in methods_data.items():
     r = data["rating"]
@@ -127,7 +122,6 @@ json_out = eval_dir / "comparison_results.json"
 json_out.write_text(json.dumps(results_out, indent=2))
 print("JSON saved to %s" % json_out)
 
-# --- Write markdown report ---
 lines = [
     "# PDF-to-Markdown Method Comparison & Ratings",
     "",

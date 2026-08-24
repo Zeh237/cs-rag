@@ -30,16 +30,11 @@ from app.services.chunking import (  # noqa: E402
 NOTES_DIR = Path("csc_notes")
 EVAL_DIR = Path("eval")
 
-
-# ---------------------------------------------------------------------------
-# Sentence boundary detection (word level)
-# ---------------------------------------------------------------------------
 _SENT_END_RE = re.compile(r"[.!?][\"')\]}]*$")
 _ABBREV = {
     "mr.", "mrs.", "ms.", "dr.", "prof.", "st.", "vs.", "e.g.", "i.e.",
     "et", "al.", "fig.", "eq.", "no.", "sec.", "pp.", "vol.", "ch.", "p.",
 }
-
 
 def _word_ends_sentence(word: str) -> bool:
     if not word:
@@ -49,7 +44,6 @@ def _word_ends_sentence(word: str) -> bool:
         return False
     return bool(_SENT_END_RE.search(word))
 
-
 def sentence_boundaries(words: list[str]) -> set[int]:
     """Word indexes that are the last word of a sentence (exclusive end indexes)."""
     ends = set()
@@ -58,16 +52,11 @@ def sentence_boundaries(words: list[str]) -> set[int]:
             ends.add(i + 1)
     return ends
 
-
-# ---------------------------------------------------------------------------
-# Running a single strategy on one note
-# ---------------------------------------------------------------------------
 def run_strategy_on_note(doc, strategy: str, target: int, overlap: int):
     start = time.time()
     chunks = chunk_document(doc, strategy, target=target, overlap=overlap)
     elapsed = time.time() - start
     return chunks, elapsed
-
 
 def chunk_metrics(doc, chunks, strategy: str, target: int, overlap: int) -> dict:
     """Compute automated checks/metrics for one strategy's chunks on one note."""
@@ -75,39 +64,32 @@ def chunk_metrics(doc, chunks, strategy: str, target: int, overlap: int) -> dict
     total_words = len(words)
     sizes = [c.span_end - c.span_start for c in chunks]
 
-    # coverage: fraction of words covered by at least one chunk
     covered = set()
     for c in chunks:
         covered.update(range(c.span_start, c.span_end))
     coverage = 100.0 * len(covered) / total_words if total_words else 0.0
 
-    # section boundaries (word indexes that start a new section)
     section_starts = set()
     for sec in doc.sections:
         if sec.paragraphs:
             section_starts.add(sec.paragraphs[0].start)
 
-    # sentence ends
     sent_ends = sentence_boundaries(words)
 
-    # per-chunk checks
     num_cross_section = 0
     num_cut_sentence = 0
     num_cut_paragraph = 0
     for c in chunks:
-        # crosses a section boundary?
+
         crosses_section = any(
             section_starts and s > c.span_start and s < c.span_end for s in section_starts
         )
         if crosses_section:
             num_cross_section += 1
 
-        # starts/ends mid-sentence (not at a sentence end, not at doc edge,
-        # and not at a section start)
         if c.span_start > 0 and c.span_start not in sent_ends and c.span_start not in section_starts:
             num_cut_sentence += 1
 
-        # starts/ends mid-paragraph
         para_boundaries = set()
         for sec in doc.sections:
             for p in sec.paragraphs:
@@ -130,10 +112,6 @@ def chunk_metrics(doc, chunks, strategy: str, target: int, overlap: int) -> dict
         "span_valid": all(c.span_end > c.span_start for c in chunks),
     }
 
-
-# ---------------------------------------------------------------------------
-# Human-inspection dumps
-# ---------------------------------------------------------------------------
 def dump_strategy(chunks_per_note, strategy: str, note_names: list[str], md_path: Path) -> None:
     lines = [
         "# Strategy: %s" % strategy,
@@ -156,10 +134,6 @@ def dump_strategy(chunks_per_note, strategy: str, note_names: list[str], md_path
             lines.append("")
     md_path.write_text("\n".join(lines), encoding="utf-8")
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def select_notes(args) -> list[tuple[Path, str]]:
     """Return a list of (path, display_name) to evaluate."""
     if args.file:
@@ -183,7 +157,7 @@ def select_notes(args) -> list[tuple[Path, str]]:
             if p.suffix != ".md":
                 p = p.with_suffix(".md")
             if not p.exists():
-                # try to find a partial match
+
                 matches = sorted(NOTES_DIR.glob("*" + name + "*.md"))
                 if matches:
                     p = matches[0]
@@ -194,15 +168,12 @@ def select_notes(args) -> list[tuple[Path, str]]:
             sys.exit(1)
         return entries
 
-    # default sample: 1 small, 1 medium, 1 large representative note,
-    # skipping near-empty files that skew the aggregate metrics
     files = [p for p in NOTES_DIR.glob("*.md") if p.stat().st_size > 2000]
     if len(files) <= 3:
         return [(f, f.name) for f in files]
     by_size = sorted(files, key=lambda p: p.stat().st_size)
     picked = [by_size[0], by_size[len(by_size) // 2], by_size[-1]]
     return [(p, p.name) for p in picked]
-
 
 def main():
     parser = argparse.ArgumentParser(description="Compare chunking strategies on real notes.")
@@ -224,7 +195,6 @@ def main():
     note_names = [name for _, name in note_entries]
     print("Notes: %s" % ", ".join(note_names))
 
-    # accumulate per-strategy results across notes
     aggregate: dict[str, list] = {s: [] for s in strategies}
     per_strategy_chunks: dict[str, dict[str, list]] = {s: {} for s in strategies}
     per_note_chunks: dict[str, dict[str, list]] = {n: {} for n in note_names}
@@ -247,14 +217,12 @@ def main():
                 metrics["coverage_pct"], metrics["cross_section"],
                 metrics["cut_sentence_pct"], metrics["elapsed"]))
 
-    # Save per-strategy dumps for human inspection
     print("\n--- Saving strategy dumps ---")
     for strategy in strategies:
         path = EVAL_DIR / ("chunk_strategy_%s.md" % strategy)
         dump_strategy(per_strategy_chunks[strategy], strategy, note_names, path)
         print("  saved %s" % path)
 
-    # Aggregate per-strategy summary
     summary = {}
     for strategy in strategies:
         rows = aggregate[strategy]
@@ -285,7 +253,6 @@ def main():
     }, indent=2), encoding="utf-8")
     print("\n**JSON results saved to:** `%s`" % json_out)
 
-    # Markdown report
     lines = [
         "# Chunking Strategy Comparison",
         "",
@@ -323,7 +290,6 @@ def main():
     report = "\n".join(lines)
     (EVAL_DIR / "chunk_comparison_report.md").write_text(report, encoding="utf-8")
     print(report)
-
 
 if __name__ == "__main__":
     main()

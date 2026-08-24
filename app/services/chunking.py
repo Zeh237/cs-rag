@@ -50,25 +50,21 @@ STRATEGY_MAP = {
     "paragraph": "document",
 }
 
-
 @dataclass
 class Paragraph:
     start: int
     end: int
-
 
 @dataclass
 class Section:
     heading: str
     paragraphs: list[Paragraph]
 
-
 @dataclass
 class ParsedDoc:
     words: list[str]
     sections: list[Section]
     word_pages: list[int] = field(default_factory=list)
-
 
 @dataclass
 class Chunk:
@@ -79,7 +75,6 @@ class Chunk:
     page_start: int | None = None
     page_end: int | None = None
 
-
 def span_overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) -> float:
     """Fraction of the gold range [b_start, b_end) covered by [a_start, a_end)."""
     length = b_end - b_start
@@ -87,7 +82,6 @@ def span_overlap_fraction(a_start: int, a_end: int, b_start: int, b_end: int) ->
         return 0.0
     intersection = max(0, min(a_end, b_end) - max(a_start, b_start))
     return intersection / length
-
 
 def _is_noise_line(line: str) -> bool:
     stripped = line.strip()
@@ -98,7 +92,6 @@ def _is_noise_line(line: str) -> bool:
     remainder = _MD_LINK_TOKEN_RE.sub("", line)
     remainder = _MD_EMPH_RE.sub("", remainder)
     return not remainder.strip()
-
 
 def parse_document(text: str) -> ParsedDoc:
     text = clean_markdown(text)
@@ -158,13 +151,11 @@ def parse_document(text: str) -> ParsedDoc:
 
     return ParsedDoc(words=words, sections=[s for s in sections if s.paragraphs], word_pages=word_pages)
 
-
 def merge_text(words: list[str], start: int, end: int, heading: str) -> str:
     body = " ".join(words[start:end]).strip()
     if heading and body:
         return f"# {heading}\n\n{body}"
     return body
-
 
 def _word_offset_map(doc: ParsedDoc):
     """Return (full_text, word_starts, word_ends) for the normalized word stream."""
@@ -173,10 +164,9 @@ def _word_offset_map(doc: ParsedDoc):
     pos = 0
     for w in doc.words:
         word_starts.append(pos)
-        pos += len(w) + 1  # +1 for the space
+        pos += len(w) + 1
     word_ends = [s + len(w) for s, w in zip(word_starts, doc.words)]
     return full_text, word_starts, word_ends
-
 
 def _map_text_to_span(full_text: str, word_starts: list[int], word_ends: list[int],
                       chunk_text: str, search_start: int = 0):
@@ -186,34 +176,32 @@ def _map_text_to_span(full_text: str, word_starts: list[int], word_ends: list[in
     """
     start_char = full_text.find(chunk_text, search_start)
     if start_char == -1:
-        start_char = full_text.find(chunk_text)  # fallback to beginning
+        start_char = full_text.find(chunk_text)
     if start_char == -1:
         return None
 
     end_char = start_char + len(chunk_text)
-    # Map character offsets to word indices (exclusive end)
+
     start_word = bisect_left(word_ends, start_char)
     end_word = bisect_right(word_starts, end_char)
     if end_word <= start_word:
         return None
     return start_word, end_word
 
-
 def _attach_heading_and_pages(doc: ParsedDoc, chunk: Chunk) -> Chunk:
     """Set heading and page numbers based on the chunk's word span."""
-    # Find section that contains the first word
+
     for section in doc.sections:
-        # Check if span_start falls within this section's word range
+
         if section.paragraphs and section.paragraphs[0].start <= chunk.span_start < section.paragraphs[-1].end:
             chunk.heading = section.heading
             break
-    # Rebuild text so the heading is included in the indexed text
+
     chunk.text = merge_text(doc.words, chunk.span_start, chunk.span_end, chunk.heading)
     if doc.word_pages and chunk.span_end > chunk.span_start:
         chunk.page_start = doc.word_pages[chunk.span_start]
         chunk.page_end = doc.word_pages[chunk.span_end - 1]
     return chunk
-
 
 def _chunk_fixed(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
     """Fixed‑size word window with overlap, using LangChain's CharacterTextSplitter."""
@@ -238,7 +226,6 @@ def _chunk_fixed(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
             search_start = full_text.find(text_chunk, search_start) + len(text_chunk)
     return chunks
 
-
 def _chunk_recursive(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
     """Recursive chunking using LangChain's RecursiveCharacterTextSplitter."""
     full_text, word_starts, word_ends = _word_offset_map(doc)
@@ -261,7 +248,6 @@ def _chunk_recursive(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
             chunks.append(chunk)
             search_start = full_text.find(text_chunk, search_start) + len(text_chunk)
     return chunks
-
 
 def _chunk_semantic(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
     """Semantic chunking using LangChain's SemanticChunker with a local embedding model."""
@@ -287,7 +273,6 @@ def _chunk_semantic(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
             search_start = full_text.find(text_chunk, search_start) + len(text_chunk)
     return chunks
 
-
 def _chunk_document_based(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
     """Document‑aware chunking: split each section independently using a recursive splitter."""
     chunks: list[Chunk] = []
@@ -298,30 +283,20 @@ def _chunk_document_based(doc: ParsedDoc, target: int, overlap: int) -> list[Chu
         separators=[" ", ""],
     )
 
-    # Build full text and offset maps once
     full_text, word_starts, word_ends = _word_offset_map(doc)
 
     for section in doc.sections:
-        # Section word range
+
         sec_start = section.paragraphs[0].start
         sec_end = section.paragraphs[-1].end
         sec_text = " ".join(doc.words[sec_start:sec_end])
 
-        # Map section character offsets to global character offsets
-        # We need to know where the section text starts in the global full_text
-        # Because full_text is the entire document. The section text is a substring,
-        # but the spaces may not align exactly if there are multiple sections?
-        # Actually full_text is just all words joined, and sections are contiguous ranges.
-        # However, section text may have different spacing? In our parse, words are joined with single space,
-        # so the section text (words[sec_start:sec_end]) joined with spaces is exactly the substring of full_text
-        # from character offset word_starts[sec_start] to word_ends[sec_end-1].
-        # We can rely on that.
         global_char_start = word_starts[sec_start]
 
         text_chunks = splitter.split_text(sec_text)
-        search_start = 0  # within section text
+        search_start = 0
         for text_chunk in text_chunks:
-            # Find local character offset of this chunk within sec_text
+
             local_start = sec_text.find(text_chunk, search_start)
             if local_start == -1:
                 local_start = sec_text.find(text_chunk)
@@ -329,11 +304,9 @@ def _chunk_document_based(doc: ParsedDoc, target: int, overlap: int) -> list[Chu
                 continue
             local_end = local_start + len(text_chunk)
 
-            # Convert to global character offsets
             global_start_char = global_char_start + local_start
             global_end_char = global_char_start + local_end
 
-            # Map global character offsets to word indices
             start_word = bisect_left(word_ends, global_start_char)
             end_word = bisect_right(word_starts, global_end_char)
             if end_word <= start_word:
@@ -343,10 +316,9 @@ def _chunk_document_based(doc: ParsedDoc, target: int, overlap: int) -> list[Chu
                           section.heading)
             chunk = _attach_heading_and_pages(doc, chunk)
             chunks.append(chunk)
-            search_start = local_end  # move forward in section text
+            search_start = local_end
 
     return chunks
-
 
 def _chunk_hierarchical(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
     """Hierarchical chunking using LlamaIndex's HierarchicalNodeParser.
@@ -387,10 +359,6 @@ def _chunk_hierarchical(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk
         sec_end = section.paragraphs[-1].end
         sec_words = doc.words[sec_start:sec_end]
 
-        # Rebuild the section body with paragraph breaks so the parser can
-        # honor paragraph boundaries. Track where each paragraph starts in
-        # sec_text (char offset) and in the global word stream so we can map
-        # node char ranges back to word spans exactly.
         para_char_starts: list[int] = []
         para_word_starts: list[int] = []
         para_word_char_starts: list[list[int]] = []
@@ -439,11 +407,6 @@ def _chunk_hierarchical(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk
 
     return chunks
 
-
-# ---------------------------------------------------------------------------
-# Main dispatcher
-# ---------------------------------------------------------------------------
-
 def chunk_document(
     doc: ParsedDoc,
     strategy: str,
@@ -458,9 +421,9 @@ def chunk_document(
         raise ValueError("target must be positive")
     if overlap < 0:
         raise ValueError("overlap must be non-negative")
-    # Map old strategy names to new ones for backward compatibility
+
     strategy = STRATEGY_MAP.get(strategy, strategy)
-    # LangChain splitters require chunk_overlap < chunk_size; clamp silently
+
     overlap = min(overlap, max(0, target - 1))
     if strategy not in CHUNK_STRATEGIES:
         raise ValueError(f"unknown strategy {strategy!r}; expected one of {CHUNK_STRATEGIES}")
@@ -476,10 +439,9 @@ def chunk_document(
     elif strategy == "hierarchical":
         chunks = _chunk_hierarchical(doc, target, overlap)
     else:
-        # Fallback (should not happen)
+
         chunks = _chunk_fixed(doc, target, overlap)
 
-    # Ensure page numbers are set
     for chunk in chunks:
         if doc.word_pages and chunk.span_end > chunk.span_start:
             chunk.page_start = doc.word_pages[chunk.span_start]

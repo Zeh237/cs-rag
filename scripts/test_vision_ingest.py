@@ -4,7 +4,6 @@ import time
 import asyncio
 from pathlib import Path
 
-# Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.config import settings
@@ -19,16 +18,13 @@ async def test_vision_ingest():
     print("Starting Vision-Based PDF Ingestion Test...")
     print(f"Target index: {TEST_INDEX}")
 
-    # 1. Ensure ES is up
     if not es_service.verify_connection():
         print("Error: Elasticsearch is not running.")
         sys.exit(1)
 
-    # 2. Recreate test index
     es_service.delete_index(TEST_INDEX)
     es_service.create_index_if_not_exists(TEST_INDEX)
 
-    # 3. Locate the test PDF
     notes_dir = Path(settings.NOTES_DIR)
     pdfs_dir = notes_dir / "pdfs"
     pdf_path = pdfs_dir / TEST_PDF
@@ -47,7 +43,6 @@ async def test_vision_ingest():
         chunks = await document_processor.chunk_pdf_vision(str(pdf_path))
         print(f"  - Generated {len(chunks)} chunks in {time.time() - doc_start:.2f}s")
 
-        # Index the chunks
         paper_id = f"vision_{pdf_path.stem}"
         for idx, chunk in enumerate(chunks):
             chunk_id = f"{paper_id}_chunk_{idx}"
@@ -78,7 +73,6 @@ async def test_vision_ingest():
     print(f"\nCompleted vision ingestion test in {duration:.2f}s!")
     print(f"Total chunks indexed: {total_chunks}")
 
-    # Verify by querying ES
     res = es_service.client.count(index=TEST_INDEX)
     count = res["count"]
     print(f"Elasticsearch document count in '{TEST_INDEX}': {count}")

@@ -33,11 +33,11 @@ _SECTION_NUM_RE = re.compile(r"^\d+(\.\d+){0,3}$")
 _DOTTED_LINE_RE = re.compile(r"(?:[.\u00b7]\s*){3,}")
 _DASH_RE = re.compile(r"^[-–—_·.\s]{3,}$")
 
-_BAND = 3  # how many top/bottom lines of a page count as the "margin"
-_WINDOW = 8  # pages to look back when deciding a margin line is running
-_MIN_RUN = 3  # margin-line appearances within the window to treat as running
-_LONG_LINE = 45  # a paragraph line is longer than this
-_MIN_STRUCT_PAGES = 12  # only apply front/back-matter drops to documents this large
+_BAND = 3
+_WINDOW = 8
+_MIN_RUN = 3
+_LONG_LINE = 45
+_MIN_STRUCT_PAGES = 12
 _BACK_MATTER_LEADS = {
     "references",
     "bibliography",
@@ -47,10 +47,8 @@ _BACK_MATTER_LEADS = {
 }
 _COPY_HINTS = ("copyright", "©", "isbn", "all rights reserved")
 
-
 def _nonempty_stripped(lines: list[str]) -> list[str]:
     return [line.strip() for line in lines if line.strip()]
-
 
 def _front_matter_noise(lines: list[str]) -> bool:
     """True for TOC / title / copyright style pages with no real paragraphs."""
@@ -59,27 +57,24 @@ def _front_matter_noise(lines: list[str]) -> bool:
     lower = " ".join(lines).lower()
     if any(hint in lower for hint in _COPY_HINTS):
         return True
-    # TOC / index style lines: dotted leaders, section numbers, page numbers.
+
     tocish = sum(
         1
         for line in lines
         if _DOTTED_LINE_RE.search(line) or _SECTION_NUM_RE.match(line) or _PAGE_NUM_RE.match(line)
     )
-    # Real paragraph lines: long lines without dotted leaders. TOC pages can
-    # carry a couple of stray mid-length entry lines, so allow up to two.
+
     real = sum(1 for line in lines if len(line) > _LONG_LINE and not _DOTTED_LINE_RE.search(line))
     if tocish >= 3 and real <= 2:
         return True
-    # Short boilerplate-only pages (title / credits / blank chapter covers).
-    return real == 0 and len(lines) >= 2
 
+    return real == 0 and len(lines) >= 2
 
 def _back_matter_lead(lines: list[str]) -> bool:
     if not lines:
         return False
     first = lines[0].lower().strip().strip(":.")
     return first in _BACK_MATTER_LEADS
-
 
 def _running_margins(pages: list[list[str]]) -> tuple[set[str], set[str]]:
     """Running headers/footers are section-scoped, so detect them locally.
@@ -106,7 +101,6 @@ def _running_margins(pages: list[list[str]]) -> tuple[set[str], set[str]]:
                 bottom_runs.add(line)
     return top_runs, bottom_runs
 
-
 def _clean_pages(pages: list[list[str]]) -> list[list[str]]:
     """Return one (possibly empty) list of kept lines per input page."""
     pages = [_nonempty_stripped(p) for p in pages]
@@ -117,23 +111,16 @@ def _clean_pages(pages: list[list[str]]) -> list[list[str]]:
     first_half = max(1, int(n * 0.5))
     top_runs, bottom_runs = _running_margins(pages)
 
-    # Structural drops rely on book-sized documents to be safe --- a real
-    # content page always has long paragraphs, so the leading run stops at the
-    # first of those. The exception is a small document where every page is
-    # boilerplate (a cover/TOC-only stub): drop it entirely.
     drop: set[int] = set()
     content_start = 0
     if n >= _MIN_STRUCT_PAGES:
-        # Front matter: drop the leading run of boilerplate pages (first half
-        # only, so figure-heavy pages later in the document are never touched).
+
         i = 0
         while i < n and i <= first_half and _front_matter_noise(pages[i]):
             drop.add(i)
             i += 1
         content_start = i
 
-        # Back matter: truncate from the first References/Bibliography/Index
-        # page after real content begins through the end of the document.
         for j in range(content_start, n):
             if _back_matter_lead(pages[j]):
                 drop.update(range(j, n))
@@ -166,7 +153,6 @@ def _clean_pages(pages: list[list[str]]) -> list[list[str]]:
         cleaned.append(kept)
     return cleaned
 
-
 def clean_page_texts(page_texts: list[tuple[int, str]]) -> list[tuple[int, str]]:
     """Clean a freshly extracted list of (page_number, raw_text) tuples."""
     pages = [text.splitlines() for _, text in page_texts]
@@ -177,14 +163,13 @@ def clean_page_texts(page_texts: list[tuple[int, str]]) -> list[tuple[int, str]]
         if lines
     ]
 
-
 def clean_markdown(text: str) -> str:
     """Clean markdown containing [[PAGE N]] markers; returns cleaned markdown."""
     if "[[PAGE" not in text:
         return text
 
     header_lines: list[str] = []
-    page_blocks: list[list[str]] = []  # each block starts with its marker line
+    page_blocks: list[list[str]] = []
     current: list[str] | None = None
     for line in text.splitlines():
         if _PAGE_MARKER_RE.match(line.strip()):

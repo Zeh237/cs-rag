@@ -23,50 +23,35 @@ PDF_PATH = "csc_notes/pdfs/" + PDF_NAME
 VLM_CACHE_DIR = Path("csc_notes/vision_markdown")
 EVAL_DIR = Path("eval")
 
-
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
 def _run_coro(coro):
     import asyncio
     return asyncio.run(coro)
 
-
-# ---------------------------------------------------------------------------
-# Method A — Use the CACHED VLM markdown
-# ---------------------------------------------------------------------------
 def method_vlm_cached(pdf_name: str):
     """Read the already-saved VLM markdown from the cache."""
     cache_file = VLM_CACHE_DIR / Path(pdf_name).with_suffix(".md").name
-    # Find the actual cache file (hash-based)
+
     cache_files = list(VLM_CACHE_DIR.glob("*.md"))
-    # Find the one matching our PDF (by basename match before _c55b62743fb7)
+
     target_basename = Path(PDF_NAME).stem
     matched = None
     for f in cache_files:
-        # e.g. algorithms_erickson_01_recursion_c55b62743fb7.md
-        stem = Path(f.stem).stem  # algorithms_erickson_01_recursion
+
+        stem = Path(f.stem).stem
         if stem == PDF_NAME.replace(".pdf", ""):
             matched = f
             break
     if matched is None:
-        # fallback: use the most recent one
+
         matched = max(cache_files, key=lambda p: p.stat().st_mtime) if cache_files else None
 
     if matched is None:
         return [], 0.0, "No cached VLM markdown found"
 
     md_content = matched.read_text(encoding="utf-8")
-    # split into "chunks" the same way the vision pipeline produces them:
-    # each chunk is the full markdown text (the vision pipeline produces one big
-    # markdown with all pages). For compatibility with the rating code, we return
-    # a list with one element.
+
     return [md_content], 0.0, None
 
-
-# ---------------------------------------------------------------------------
-# Method B — fitz raw text (no cleaning)
-# ---------------------------------------------------------------------------
 def method_fitz_raw(pdf_path):
     start = time.time()
     doc = fitz.open(pdf_path)
@@ -79,10 +64,6 @@ def method_fitz_raw(pdf_path):
     elapsed = time.time() - start
     return [chunks], elapsed, None
 
-
-# ---------------------------------------------------------------------------
-# Method C — fitz + clean_page_texts()
-# ---------------------------------------------------------------------------
 def method_fitz_clean(pdf_path):
     start = time.time()
     doc = fitz.open(pdf_path)
@@ -98,10 +79,6 @@ def method_fitz_clean(pdf_path):
     elapsed = time.time() - start
     return [marked_chunks], elapsed, None
 
-
-# ---------------------------------------------------------------------------
-# Method D — plain text (no markdown conversion)
-# ---------------------------------------------------------------------------
 def method_plain(pdf_path):
     start = time.time()
     doc = fitz.open(pdf_path)
@@ -119,10 +96,6 @@ def method_plain(pdf_path):
     elapsed = time.time() - start
     return [marked], elapsed, None
 
-
-# ---------------------------------------------------------------------------
-# Checks / ratings for a single markdown output
-# ---------------------------------------------------------------------------
 def rate_markdown(md_content: str, method_name: str) -> dict:
     text = md_content or ""
     has_page_markers = bool(re.search(r"\[\[PAGE \d+\]\]", text))
@@ -152,10 +125,6 @@ def rate_markdown(md_content: str, method_name: str) -> dict:
         "score_pct": round(100.0 * score / max_score, 1) if max_score else 0,
     }
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main():
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -175,10 +144,9 @@ def main():
         if error:
             print("  Error: %s" % error)
 
-        # Save markdown file
         md_name = name.replace(".", "_").replace(" ", "_")
         md_path = EVAL_DIR / ("method_%s.md" % md_name)
-        # chunks is a list of strings (per-page or one big string)
+
         all_md_lines = []
         for block in chunks:
             if isinstance(block, list):
@@ -190,7 +158,6 @@ def main():
         markdown_files[name] = md_path
         print("  Saved markdown to: %s" % md_path)
 
-        # Rate the markdown
         rating = rate_markdown(md_content, name)
         results[name] = {
             "elapsed": round(elapsed, 2),
@@ -201,7 +168,6 @@ def main():
         print("  Checks: page_markers=%s, multi_pages=%s, length=%d, heading=%s" % (
             rating["has_page_markers"], rating["has_multiple_pages"], rating["text_length"], rating["has_heading"]))
 
-    # Save JSON results
     results_out = {}
     for name, r in results.items():
         results_out[name] = {
@@ -220,7 +186,6 @@ def main():
     json_out.write_text(json.dumps(results_out, indent=2))
     print("\n**JSON results saved to:** `%s`" % json_out)
 
-    # Markdown report
     lines = [
         "# PDF-to-Markdown Method Comparison & Ratings",
         "",
@@ -255,7 +220,6 @@ def main():
     lines.append("")
     lines.append("**Markdown report saved to:** `eval/comparison_report.md`")
     print("\n".join(lines))
-
 
 if __name__ == "__main__":
     main()

@@ -14,7 +14,6 @@ _BIBLIOGRAPHY_PATTERNS = [
     r"(?i)(?:\n|^|\s)Works Cited\b",
 ]
 
-
 class DocumentProcessor:
     def chunk_pdf(self, file_path: str, chunk_size: int = 1000, overlap: int = 200) -> list[dict]:
         if not os.path.exists(file_path):
@@ -63,7 +62,6 @@ class DocumentProcessor:
         if not os.path.exists(file_path):
             raise FileNotFoundError(file_path)
 
-        # Check cache first
         if use_cached:
             cached = self._load_vision_markdown_cache(file_path)
             if cached is not None:
@@ -245,6 +243,5 @@ class DocumentProcessor:
                 word_idx = len(combined[: match.start()].split())
                 cutoff = min(cutoff, word_idx)
         return cutoff
-
 
 document_processor = DocumentProcessor()
