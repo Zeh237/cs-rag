@@ -21,6 +21,12 @@ text chunks are mapped back to word indices using character offsets.
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
 import re
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
@@ -253,8 +259,16 @@ def _chunk_semantic(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
     """Semantic chunking using LangChain's SemanticChunker with a local embedding model."""
     full_text, word_starts, word_ends = _word_offset_map(doc)
     try:
+        try:
+            embeddings = HuggingFaceEmbeddings(
+                model_name="all-MiniLM-L6-v2",
+                model_kwargs={"local_files_only": True, "trust_remote_code": False},
+                encode_kwargs={"normalize_embeddings": True},
+            )
+        except TypeError:
+            embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         splitter = SemanticChunker(
-            HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2"),
+            embeddings,
             breakpoint_threshold_type="percentile",
         )
         text_chunks = splitter.split_text(full_text)

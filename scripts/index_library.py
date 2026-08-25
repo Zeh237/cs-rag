@@ -1,6 +1,11 @@
 import argparse
 import json
 import os
+
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
 import sys
 from pathlib import Path
 
@@ -78,8 +83,20 @@ def _extract_pdf_markdown(pdf_path: Path, method: str) -> str | None:
     if method == "vlm":
         md = _load_vlm_markdown(pdf_path)
         if md is not None:
+            print(f"  + VLM cache hit for {pdf_path.name}")
             return md
-        print(f"  ! VLM cache miss for {pdf_path.name}; falling back to fitz-clean")
+        print(f"  * VLM cache miss for {pdf_path.name}; calling LM Studio ...")
+        try:
+            import asyncio
+
+            page_texts = asyncio.run(document_processor._transcribe_pdf_pages(str(pdf_path)))
+            document_processor._save_vision_markdown_cache(str(pdf_path), page_texts)
+            md_live = "\n\n".join(f"[[PAGE {p}]]\n{t}" for p, t in page_texts if t and t.strip() != "[SKIP]")
+            if md_live.strip():
+                print(f"  + VLM transcribed {len(page_texts)} pages for {pdf_path.name}")
+                return md_live
+        except Exception as e:
+            print(f"  ! VLM transcription failed for {pdf_path.name}: {e}; falling back to fitz-clean")
         method = "fitz-clean"
 
     if method == "fitz-raw":

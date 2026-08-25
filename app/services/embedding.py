@@ -1,3 +1,9 @@
+import os
+
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
 from app.core.config import settings
 
 
@@ -10,7 +16,14 @@ class EmbeddingService:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(settings.EMBEDDING_MODEL)
+            try:
+                self._model = SentenceTransformer(
+                    settings.EMBEDDING_MODEL,
+                    local_files_only=True,
+                    trust_remote_code=False,
+                )
+            except Exception:
+                self._model = SentenceTransformer(settings.EMBEDDING_MODEL)
         return self._model
 
     def get_embeddings(self, text: str):
