@@ -23,9 +23,8 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
 
 import re
 from bisect import bisect_left, bisect_right
@@ -272,8 +271,20 @@ def _chunk_semantic(doc: ParsedDoc, target: int, overlap: int) -> list[Chunk]:
             breakpoint_threshold_type="percentile",
         )
         text_chunks = splitter.split_text(full_text)
-    except Exception:
-        return _chunk_fixed(doc, target, overlap)
+    except Exception as e:
+        msg = str(e)
+        if "local_files_only" in msg or "We couldn't connect" in msg or "couldn't find" in msg:
+            try:
+                if "HF_HUB_OFFLINE" in os.environ:
+                    os.environ.pop("HF_HUB_OFFLINE", None)
+                    os.environ.pop("TRANSFORMERS_OFFLINE", None)
+                embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+                splitter = SemanticChunker(embeddings, breakpoint_threshold_type="percentile")
+                text_chunks = splitter.split_text(full_text)
+            except Exception:
+                return _chunk_fixed(doc, target, overlap)
+        else:
+            return _chunk_fixed(doc, target, overlap)
 
     chunks: list[Chunk] = []
     search_start = 0

@@ -31,21 +31,45 @@ _INDEX_MAPPING = {
 
 class ElasticsearchService:
     def __init__(self) -> None:
+        common = dict(
+            verify_certs=False,
+            ssl_show_warn=False,
+            request_timeout=10,
+            retry_on_timeout=True,
+            max_retries=2,
+        )
         if settings.ES_USER and settings.ES_PASSWORD:
             self.client = Elasticsearch(
                 settings.ES_HOST,
                 basic_auth=(settings.ES_USER, settings.ES_PASSWORD),
-                verify_certs=False,
-                ssl_show_warn=False,
+                **common,
             )
         else:
-            self.client = Elasticsearch(settings.ES_HOST)
+            self.client = Elasticsearch(settings.ES_HOST, **common)
 
     def verify_connection(self) -> bool:
+        for probe in (
+            lambda: self.client.ping(),
+            lambda: bool(self.client.info()),
+        ):
+            try:
+                if probe():
+                    return True
+            except Exception:
+                continue
         try:
-            return self.client.ping()
+            compat = self.client.options(
+                headers={"accept": "application/vnd.elasticsearch+json; compatible-with=8"}
+            )
+            if compat.ping():
+                self.client = compat
+                return True
+            if bool(compat.info()):
+                self.client = compat
+                return True
         except Exception:
-            return False
+            pass
+        return False
 
     def create_index_if_not_exists(self, index: str | None = None) -> None:
         index = index or settings.INDEX_NAME

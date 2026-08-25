@@ -1,8 +1,7 @@
 import os
 
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "60")
 
 
 class RerankerService:
@@ -14,14 +13,24 @@ class RerankerService:
         if self._model is None:
             from sentence_transformers import CrossEncoder
 
+            model_id = "cross-encoder/ms-marco-MiniLM-L-6-v2"
             try:
                 self._model = CrossEncoder(
-                    "cross-encoder/ms-marco-MiniLM-L-6-v2",
+                    model_id,
                     local_files_only=True,
                     trust_remote_code=False,
                 )
             except Exception:
-                self._model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+                if "HF_HUB_OFFLINE" in os.environ:
+                    os.environ.pop("HF_HUB_OFFLINE", None)
+                    os.environ.pop("TRANSFORMERS_OFFLINE", None)
+                try:
+                    self._model = CrossEncoder(model_id, trust_remote_code=False)
+                except Exception as e:
+                    raise OSError(
+                        f"Could not load '{model_id}' from cache and could not reach "
+                        f"huggingface.co ({e}). Check network."
+                    ) from e
         return self._model
 
     def rerank(self, query: str, hits: list[dict], top_k: int | None = None) -> list[dict]:
