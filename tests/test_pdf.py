@@ -138,3 +138,22 @@ def test_render_page_images(tmp_path, monkeypatch):
     assert "Page one alpha text." in out[0]["text"]
 
     assert svc.render_page_images("unknown_paper", [1], dpi=80) == []
+
+
+def test_align_tokens_and_line_merging():
+    from app.services.highlight import align_tokens, merge_rects, tokenize
+
+    chunk_text = "Recursion relies on base cases and smaller subproblems."
+    page_text = "Header recursion. Recursion relies on base cases and smaller subproblems. Footer text."
+    
+    chunk_keys = tokenize(chunk_text)
+    page_keys = tokenize(page_text)
+    
+    matched_indices = align_tokens(chunk_keys, page_keys)
+    assert len(matched_indices) >= len(chunk_keys) - 2
+
+    # Test line merging creates a single unified horizontal line box
+    rects = [(10, 100, 50, 115), (55, 101, 120, 115), (125, 99, 180, 114)]
+    merged = merge_rects(rects)
+    assert len(merged) == 1
+    assert merged[0] == [10.0, 99.0, 180.0, 115.0]

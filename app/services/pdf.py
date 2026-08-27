@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from app.core.config import PROJECT_ROOT, settings
 from app.services.elasticsearch import es_service
+from app.services.highlight import compute_highlight_boxes
 
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
 
@@ -74,10 +75,6 @@ class PdfService:
     def _build_highlighted_pdf(self, pdf_path: str, chunk_id: str) -> bytes | None:
         """Return a re-serialized PDF with highlights, or None if no highlight
         could be placed (then the pristine file is served instead).
-
-        The scan window comes from the chunk's own page span (plus a small
-        margin) so the fallback never sweeps a whole multi-hundred-page book,
-        which was the source of the multi-second first load.
         """
         try:
             source = es_service.client.get(index=self.index_name, id=chunk_id)["_source"]
@@ -88,9 +85,47 @@ class PdfService:
         try:
             page_start = int(source.get("page_start") or source.get("page_number") or 1)
             page_end = int(source.get("page_end") or page_start)
-            matches = self._highlight_by_search(doc, source["text"], range(max(0, page_start - 2), min(len(doc), page_end + 2)))
+
+            matches = 0
+            # 1. Use pre-computed highlight_boxes if stored in ES
+            highlight_boxes = source.get("highlight_boxes")
+            if highlight_boxes and isinstance(highlight_boxes, dict):
+                for page_str, rects in highlight_boxes.items():
+                    try:
+                        page_num = int(page_str)
+                        if 1 <= page_num <= len(doc):
+                            page = doc[page_num - 1]
+                            for r in rects:
+                                annot = page.add_highlight_annot(fitz.Rect(*r))
+                                annot.set_colors(stroke=(1, 0.8, 0))
+                                annot.update()
+                                matches += 1
+                    except (ValueError, TypeError):
+                        continue
+
+            # 2. Fallback: compute highlight boxes strictly on the chunk's pages [page_start..page_end]
             if matches == 0:
-                matches = self._highlight_by_search(doc, source["text"], range(max(0, page_start - 6), min(len(doc), page_end + 6)))
+                chunk_text = source.get("text", "")
+                target_pages = list(range(max(1, page_start), min(len(doc), page_end) + 1))
+                boxes = compute_highlight_boxes(doc, target_pages, chunk_text)
+                for page_str, rects in boxes.items():
+                    try:
+                        page_num = int(page_str)
+                        if 1 <= page_num <= len(doc):
+                            page = doc[page_num - 1]
+                            for r in rects:
+                                annot = page.add_highlight_annot(fitz.Rect(*r))
+                                annot.set_colors(stroke=(1, 0.8, 0))
+                                annot.update()
+                                matches += 1
+                    except (ValueError, TypeError):
+                        continue
+
+            # 3. Secondary fallback: phrase search strictly on target page range
+            if matches == 0:
+                target_range = range(max(0, page_start - 1), min(len(doc), page_end))
+                matches = self._highlight_by_search(doc, source["text"], target_range)
+
             if matches == 0:
                 return None
 
