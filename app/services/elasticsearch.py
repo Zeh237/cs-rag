@@ -6,17 +6,41 @@ from app.core.config import settings
 from app.services.reranker import reranker_service
 
 _INDEX_MAPPING = {
+    "settings": {
+        "analysis": {
+            "analyzer": {
+                "custom_english": {
+                    "tokenizer": "standard",
+                    "filter": [
+                        "lowercase",
+                        "english_possessive_stemmer",
+                        "english_stemmer",
+                    ],
+                }
+            },
+            "filter": {
+                "english_possessive_stemmer": {
+                    "type": "stemmer",
+                    "language": "possessive_english",
+                },
+                "english_stemmer": {
+                    "type": "stemmer",
+                    "language": "english",
+                },
+            },
+        }
+    },
     "mappings": {
         "properties": {
             "paper_id": {"type": "keyword"},
-            "title": {"type": "text"},
+            "title": {"type": "text", "analyzer": "custom_english"},
             "authors": {"type": "keyword"},
-            "category": {"type": "keyword"},
+            "category": {"type": "text", "analyzer": "custom_english"},
             "chunk_id": {"type": "keyword"},
             "page_number": {"type": "integer"},
             "page_start": {"type": "integer"},
             "page_end": {"type": "integer"},
-            "text": {"type": "text"},
+            "text": {"type": "text", "analyzer": "custom_english"},
             "highlight_boxes": {"type": "object", "enabled": False},
             "source_url": {"type": "keyword"},
             "local_pdf": {"type": "boolean"},
@@ -25,7 +49,7 @@ _INDEX_MAPPING = {
             "span_end": {"type": "integer"},
             "strategy": {"type": "keyword"},
         }
-    }
+    },
 }
 
 
@@ -88,7 +112,19 @@ class ElasticsearchService:
             self.client.indices.delete(index=index)
 
     def keyword_search(self, query: str, limit: int = 5, index: str | None = None) -> list[dict]:
-        body = {"query": {"multi_match": {"query": query, "fields": ["text", "title^3", "category^1.5"]}}}
+        body = {
+            "query": {
+                "multi_match": {
+                    "query": query,
+                    "fields": ["text^2", "title", "category^1.5"],
+                    "type": "best_fields",
+                    "operator": "and",
+                    "fuzziness": "AUTO",
+                    "prefix_length": 2,
+                    "zero_terms_query": "none",
+                }
+            }
+        }
         response = self.client.search(index=index or settings.INDEX_NAME, body=body, size=limit)
         return self._format_results(response, index=index)
 
@@ -144,15 +180,22 @@ class ElasticsearchService:
         return "\n\n".join(entry.get("text", "") for entry in entries)
 
     def search_pages(self, paper_id: str, query: str, limit: int = 12) -> list[dict]:
-        """Page-level keyword search inside a single document.
-
-        Returns one entry per page (sorted by page) with a short text snippet and
-        the chunk id, for the vision research tool."""
         body = {
             "query": {
                 "bool": {
                     "filter": [{"term": {"paper_id": paper_id}}],
-                    "must": [{"multi_match": {"query": query, "fields": ["text", "title^2"]}}],
+                    "must": [
+                        {
+                            "multi_match": {
+                                "query": query,
+                                "fields": ["text", "title^2"],
+                                "type": "best_fields",
+                                "operator": "and",
+                                "fuzziness": "AUTO",
+                                "prefix_length": 2,
+                            }
+                        }
+                    ],
                 }
             }
         }
@@ -168,8 +211,6 @@ class ElasticsearchService:
         return [by_page[p] for p in sorted(by_page)]
 
     def get_chunk_window_entries(self, chunk_id: str, window_size: int = 1) -> list[dict]:
-        """Return the anchor chunk plus up to `window_size` neighbors each side,
-        as full source documents (text + page fields), ordered by chunk index."""
         prefix, current_idx = self._parse_chunk_id(chunk_id)
         if prefix is None or current_idx is None:
             try:

@@ -1,7 +1,7 @@
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,14 +13,16 @@ _bearer = HTTPBearer()
 
 
 class AuthService:
-    def __init__(self) -> None:
-        self._pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
     def hash_password(self, plain: str) -> str:
-        return self._pwd_context.hash(plain)
+        # Convert string to bytes before hashing
+        pwd_bytes = plain.encode("utf-8")
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
     def verify_password(self, plain: str, hashed: str) -> bool:
-        return self._pwd_context.verify(plain, hashed)
+        pwd_bytes = plain.encode("utf-8")
+        hashed_bytes = hashed.encode("utf-8")
+        return bcrypt.checkpw(pwd_bytes, hashed_bytes)
 
     def create_access_token(self, user_id: int, username: str) -> str:
         payload = {"sub": str(user_id), "username": username}
