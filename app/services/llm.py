@@ -205,6 +205,7 @@ class LLMService:
         history: Optional[list[dict[str, str]]] = None,
         max_pages: int = 12,
         max_tool_iters: int = 8,
+        evidence_pages: Optional[set[int]] = None,
     ) -> AsyncGenerator[str, None]:
         """Vision research mode: streams the model's final answer after it has
         used tools to read pages of a PDF. Tool results are returned as text
@@ -244,6 +245,8 @@ class LLMService:
         messages.append({"role": "user", "content": content})
 
         pages_read = {img.get("page") for img in seed_images if img.get("image")}
+        if evidence_pages is not None:
+            evidence_pages.update(page for page in pages_read if page is not None)
         limit_notified = False
 
         for _ in range(max_tool_iters):
@@ -339,6 +342,8 @@ class LLMService:
                         continue
                     rendered = await callbacks["read_pages"](new_pages)
                     pages_read.update(r.get("page") for r in rendered)
+                    if evidence_pages is not None:
+                        evidence_pages.update(r.get("page") for r in rendered if r.get("page") is not None)
                     parts: list[dict] = []
                     for r in rendered:
                         if r.get("image"):

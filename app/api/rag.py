@@ -63,9 +63,12 @@ def _build_toc(paper_id: str, max_entries: int = 150) -> str:
     return "\n".join(lines)
 
 
-def _research_callbacks(paper_id: str) -> dict:
+def _research_callbacks(paper_id: str, evidence_pages: set[int] | None = None) -> dict:
     async def search_doc(query: str) -> str:
-        return json.dumps(es_service.search_pages(paper_id, query, limit=12), ensure_ascii=False)
+        results = es_service.search_pages(paper_id, query, limit=12)
+        if evidence_pages is not None:
+            evidence_pages.update(result["page"] for result in results if result.get("page") is not None)
+        return json.dumps(results, ensure_ascii=False)
 
     async def toc() -> str:
         return _build_toc(paper_id)
@@ -74,6 +77,20 @@ def _research_callbacks(paper_id: str) -> dict:
         return pdf_service.render_page_images(paper_id, pages, dpi=settings.RESEARCH_DPI)
 
     return {"search_document": search_doc, "get_toc": toc, "read_pages": read_pages}
+
+
+def _research_sources(paper_id: str, title: str, pages: set[int]) -> list[dict]:
+    return [
+        {
+            "paper_id": paper_id,
+            "title": title,
+            "page_number": page,
+            "page_start": page,
+            "page_end": page,
+            "local_pdf": bool(pdf_service.has_local_pdf(paper_id)),
+        }
+        for page in sorted(pages)
+    ]
 
 
 def _research_seed(hit: dict) -> list[dict] | None:
@@ -235,22 +252,24 @@ async def ask_rag(q: str = Query(...), limit: int = 4, window_size: int = 2, mod
             hit = _top_research_hit(search_query)
             seed_images = _research_seed(hit) if hit else None
             if seed_images:
+                evidence_pages: set[int] = set()
                 answer = ""
                 async for chunk in llm_service.stream_research_response(
                     q,
                     paper_id=hit["paper_id"],
                     title=hit["title"],
                     seed_images=seed_images,
-                    callbacks=_research_callbacks(hit["paper_id"]),
+                    callbacks=_research_callbacks(hit["paper_id"], evidence_pages),
                     toc_hint=_build_toc(hit["paper_id"]),
                     max_pages=settings.RESEARCH_MAX_PAGES,
+                    evidence_pages=evidence_pages,
                 ):
                     answer += chunk
                 return RagResponse(
                     question=q,
                     answer=_linkify_page_refs(answer, hit["paper_id"]),
                     search_query=search_query,
-                    sources=[SourceHit(**source) for source in _build_sources([hit])],
+                    sources=[SourceHit(**source) for source in _research_sources(hit["paper_id"], hit["title"], evidence_pages)],
                 )
 
         hits = _retrieve(search_query, limit)
@@ -289,6 +308,7 @@ async def ask_rag_stream(
 
         research_hit: dict | None = None
         research_seed: list[dict] | None = None
+        research_evidence_pages: set[int] = set()
         if _research_enabled() and mode != "chunks":
             hit = _top_research_hit(search_query)
             seed = _research_seed(hit) if hit else None
@@ -309,11 +329,9 @@ async def ask_rag_stream(
 
         if research_hit is not None:
             hit = research_hit
-            sources = _build_sources([hit])
 
             async def research_stream():
                 yield f"event: search_query\ndata: {json.dumps(search_query)}\n\n"
-                yield f"event: sources\ndata: {json.dumps(sources)}\n\n"
                 yield f"event: research\ndata: {json.dumps({'paper_id': hit['paper_id'], 'title': hit['title']})}\n\n"
 
                 tokens = []
@@ -322,10 +340,11 @@ async def ask_rag_stream(
                     paper_id=hit["paper_id"],
                     title=hit["title"],
                     seed_images=research_seed,
-                    callbacks=_research_callbacks(hit["paper_id"]),
+                    callbacks=_research_callbacks(hit["paper_id"], research_evidence_pages),
                     toc_hint=_build_toc(hit["paper_id"]),
                     history=history,
                     max_pages=settings.RESEARCH_MAX_PAGES,
+                    evidence_pages=research_evidence_pages,
                 ):
                     tokens.append(chunk)
                     yield f"event: token\ndata: {json.dumps(chunk)}\n\n"
@@ -333,6 +352,8 @@ async def ask_rag_stream(
                 full_response = "".join(tokens)
                 await memory_store.add_message(session_id, "user", q)
                 await memory_store.add_message(session_id, "assistant", full_response)
+                sources = _research_sources(hit["paper_id"], hit["title"], research_evidence_pages)
+                yield f"event: sources\ndata: {json.dumps(sources)}\n\n"
                 yield "event: done\ndata: {}\n\n"
 
             return StreamingResponse(research_stream(), media_type="text/event-stream", headers=_STREAM_HEADERS)
