@@ -1,0 +1,9 @@
+ACKNOWLEDGEMENT
+
+I express my sincere gratitude to my supervisor, Dr. Kweteyim Denis, for his guidance, support and valuable advice throughout this work. His insight and encouragement were essential to the completion of this project.
+
+I also thank the Department of Computer Science, University of Buea, for providing the academic environment and resources for this research.
+
+I thank my family and friends for their continuous support and encouragement.
+
+Finally, I thank all who contributed directly or indirectly to the success of this work.

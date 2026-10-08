@@ -53,6 +53,23 @@ _INDEX_MAPPING = {
 }
 
 
+def normalize_scores(hits: list[dict]) -> list[dict]:
+    """Min-max normalize hit scores to [0, 1] in place (relative per query).
+
+    The best hit always maps to 1.0 and the worst to 0.0. The original value
+    is preserved as ``raw_score``. Ordering is unchanged.
+    """
+    if not hits:
+        return hits
+    raw = [float(h.get("score", 0.0)) for h in hits]
+    lo, hi = min(raw), max(raw)
+    span = hi - lo
+    for hit, value in zip(hits, raw):
+        hit["raw_score"] = value
+        hit["score"] = 1.0 if span <= 0 else (value - lo) / span
+    return hits
+
+
 class ElasticsearchService:
     def __init__(self) -> None:
         common = dict(
@@ -111,22 +128,37 @@ class ElasticsearchService:
         if self.client.indices.exists(index=index):
             self.client.indices.delete(index=index)
 
-    def keyword_search(self, query: str, limit: int = 5, index: str | None = None) -> list[dict]:
-        body = {
-            "query": {
-                "multi_match": {
-                    "query": query,
-                    "fields": ["text^2", "title", "category^1.5"],
-                    "type": "best_fields",
-                    "operator": "and",
-                    "fuzziness": "AUTO",
-                    "prefix_length": 2,
-                    "zero_terms_query": "none",
-                }
+    def _keyword_query(self, query: str) -> dict:
+        """Term recall plus an exact-phrase precision boost.
+
+        Pure AND matching forces every stopword to match and buries
+        definitional passages under high-TF exercise chunks, so the term
+        clause uses OR while a ``match_phrase`` clause promotes chunks that
+        contain the question wording verbatim (e.g. "What is an algorithm?").
+        """
+        return {
+            "bool": {
+                "should": [
+                    {
+                        "multi_match": {
+                            "query": query,
+                            "fields": ["text^2", "title", "category^1.5"],
+                            "type": "best_fields",
+                            "operator": "or",
+                            "fuzziness": "AUTO",
+                            "prefix_length": 2,
+                            "zero_terms_query": "none",
+                        }
+                    },
+                    {"match_phrase": {"text": {"query": query, "boost": 4.0}}},
+                ]
             }
         }
+
+    def keyword_search(self, query: str, limit: int = 5, index: str | None = None) -> list[dict]:
+        body = {"query": self._keyword_query(query)}
         response = self.client.search(index=index or settings.INDEX_NAME, body=body, size=limit)
-        return self._format_results(response, index=index)
+        return normalize_scores(self._format_results(response, index=index))
 
     def semantic_search_cosine(self, query_vector: list[float], limit: int = 5, index: str | None = None) -> list[dict]:
         body = {
@@ -141,7 +173,7 @@ class ElasticsearchService:
             }
         }
         response = self.client.search(index=index or settings.INDEX_NAME, body=body, size=limit)
-        return self._format_results(response, index)
+        return normalize_scores(self._format_results(response, index))
 
     def hybrid_search(
         self,
@@ -165,7 +197,8 @@ class ElasticsearchService:
 
         ranked = sorted(fused.values(), key=lambda h: h["_rrf_score"], reverse=True)
         for hit in ranked:
-            hit.pop("_rrf_score", None)
+            hit["raw_score"] = hit.pop("_rrf_score", 0.0)
+            hit["score"] = hit["raw_score"]
 
         if rerank:
             try:
@@ -173,7 +206,7 @@ class ElasticsearchService:
             except Exception:
                 pass
 
-        return ranked[:limit]
+        return normalize_scores(ranked[:limit])
 
     def get_chunk_window(self, chunk_id: str, window_size: int = 1) -> str:
         entries = self.get_chunk_window_entries(chunk_id, window_size)
@@ -186,13 +219,20 @@ class ElasticsearchService:
                     "filter": [{"term": {"paper_id": paper_id}}],
                     "must": [
                         {
-                            "multi_match": {
-                                "query": query,
-                                "fields": ["text", "title^2"],
-                                "type": "best_fields",
-                                "operator": "and",
-                                "fuzziness": "AUTO",
-                                "prefix_length": 2,
+                            "bool": {
+                                "should": [
+                                    {
+                                        "multi_match": {
+                                            "query": query,
+                                            "fields": ["text", "title^2"],
+                                            "type": "best_fields",
+                                            "operator": "or",
+                                            "fuzziness": "AUTO",
+                                            "prefix_length": 2,
+                                        }
+                                    },
+                                    {"match_phrase": {"text": {"query": query, "boost": 4.0}}},
+                                ]
                             }
                         }
                     ],

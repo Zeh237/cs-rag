@@ -1,4 +1,4 @@
-from app.services.elasticsearch import ElasticsearchService
+from app.services.elasticsearch import ElasticsearchService, normalize_scores
 
 
 class FakeClient:
@@ -42,6 +42,44 @@ def test_index_chunk_roundtrip():
     svc = _svc([])
     svc.index_chunk("p1_chunk_0", {"paper_id": "p1", "text": "hello"})
     assert svc.client.get(index="i", id="p1_chunk_0")["_source"] == {"paper_id": "p1", "text": "hello"}
+
+
+def test_normalize_scores_bounds_and_order():
+    hits = [{"score": 12.0}, {"score": 4.0}, {"score": 8.0}]
+    out = normalize_scores(hits)
+    assert [h["score"] for h in out] == [1.0, 0.0, 0.5]
+    assert [h["raw_score"] for h in out] == [12.0, 4.0, 8.0]
+    assert all(0.0 <= h["score"] <= 1.0 for h in out)
+
+
+def test_normalize_scores_single_hit_and_empty():
+    assert normalize_scores([]) == []
+    out = normalize_scores([{"score": 7.5}])
+    assert out[0]["score"] == 1.0
+    assert out[0]["raw_score"] == 7.5
+
+
+def test_keyword_query_uses_or_plus_phrase_boost():
+    seen = {}
+
+    class CapturingClient(FakeClient):
+        def search(self, index, body=None, size=None):
+            seen["body"] = body
+            return {"hits": {"hits": []}}
+
+    svc = _svc([])
+    svc.client = CapturingClient({})
+    assert svc.keyword_search("What is an algorithm?", limit=5) == []
+    should = seen["body"]["query"]["bool"]["should"]
+    kinds = [list(clause)[0] for clause in should]
+    assert kinds == ["multi_match", "match_phrase"]
+    assert should[0]["multi_match"]["operator"] == "or"
+    assert should[1]["match_phrase"]["text"]["boost"] == 4.0
+
+
+def test_normalize_scores_all_equal():
+    out = normalize_scores([{"score": 3.0}, {"score": 3.0}])
+    assert [h["score"] for h in out] == [1.0, 1.0]
 
 
 def test_format_results_normalizes_fields():
