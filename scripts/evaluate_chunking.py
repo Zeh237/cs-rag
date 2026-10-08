@@ -63,7 +63,7 @@ def is_relevant(hit: dict, gold_start: int, gold_end: int, ratio: float) -> bool
 
 
 async def retrieve(index: str, question: str, top_k: int) -> dict[str, list[dict]]:
-    query_vector = embedding_service.get_embeddings(question)
+    query_vector = embedding_service.get_query_embeddings(question)
     keyword = es_service.keyword_search(question, limit=top_k, index=index)
     semantic = es_service.semantic_search_cosine(query_vector, limit=top_k, index=index)
     hybrid = es_service.hybrid_search(question, query_vector, limit=top_k, rerank=False, index=index)

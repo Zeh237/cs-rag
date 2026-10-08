@@ -52,7 +52,7 @@ async def retrieve_question(question: str, top_k: int, use_rewrite: bool) -> dic
     if use_rewrite:
         query = await llm_service.rewrite_query_for_search(question, None)
 
-    query_vector = embedding_service.get_embeddings(query)
+    query_vector = embedding_service.get_query_embeddings(query)
 
     keyword = _ranks(es_service.keyword_search(query, limit=top_k))[:top_k]
     semantic = _ranks(es_service.semantic_search_cosine(query_vector, limit=top_k))[:top_k]

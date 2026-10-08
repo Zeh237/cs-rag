@@ -19,7 +19,7 @@ async def keyword_search(q: str = Query(...), limit: int = 5):
 async def semantic_search(q: str = Query(...), limit: int = 5):
     try:
         results = es_service.semantic_search_cosine(
-            query_vector=embedding_service.get_embeddings(q), limit=limit
+            query_vector=embedding_service.get_query_embeddings(q), limit=limit
         )
         return {"query": q, "results": results}
     except Exception as e:

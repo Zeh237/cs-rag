@@ -62,7 +62,7 @@ def _process_document(paper_id: str, local_path: str, ext: str, meta: dict) -> d
                     "highlight_boxes": chunk.get("highlight_boxes", {}),
                     "source_url": meta["url"],
                     "local_pdf": ext == ".pdf",
-                    "vector_embedding": embedding_service.get_embeddings(chunk["text"]),
+                    "vector_embedding": embedding_service.get_document_embeddings(chunk["text"]),
                 },
             )
         es_service.refresh_index()

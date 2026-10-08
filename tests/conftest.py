@@ -112,7 +112,9 @@ def client(monkeypatch):
     monkeypatch.setattr(llm_service, "rewrite_query_for_search", _rewrite)
     monkeypatch.setattr(llm_service, "generate_response", _generate)
     monkeypatch.setattr(llm_service, "stream_response", _stream)
-    monkeypatch.setattr(embedding_service, "get_embeddings", lambda text: [0.1] * 384)
+    monkeypatch.setattr(embedding_service, "get_embeddings", lambda text, task=None: [0.1] * 384)
+    monkeypatch.setattr(embedding_service, "get_query_embeddings", lambda text: [0.1] * 384)
+    monkeypatch.setattr(embedding_service, "get_document_embeddings", lambda text: [0.1] * 384)
 
     submitted: dict[str, tuple] = {}
 

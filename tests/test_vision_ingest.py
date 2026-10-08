@@ -60,7 +60,7 @@ async def test_vision_ingest():
                     "highlight_boxes": chunk.get("highlight_boxes", {}),
                     "source_url": "",
                     "local_pdf": True,
-                    "vector_embedding": embedding_service.get_embeddings(chunk["text"]),
+                    "vector_embedding": embedding_service.get_document_embeddings(chunk["text"]),
                 }
             )
         total_chunks += len(chunks)

@@ -25,7 +25,7 @@ class Settings:
     RESEARCH_DPI: int = int(os.getenv("RESEARCH_DPI", "110"))
     RESEARCH_SEED_WINDOW: int = int(os.getenv("RESEARCH_SEED_WINDOW", "1"))
     RESEARCH_TOP_K_DOCS: int = int(os.getenv("RESEARCH_TOP_K_DOCS", "1"))
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "google/embeddinggemma-2")
 
     REDIS_HOST: str = os.getenv("REDIS_HOST", "redis://localhost:6379/")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")

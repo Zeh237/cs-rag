@@ -107,7 +107,7 @@ def _research_seed(hit: dict) -> list[dict] | None:
 def _top_research_hit(search_query: str) -> dict | None:
     candidates = es_service.hybrid_search(
         query=search_query,
-        query_vector=embedding_service.get_embeddings(search_query),
+        query_vector=embedding_service.get_query_embeddings(search_query),
         limit=12,
     )
     if not candidates:
@@ -237,7 +237,7 @@ def _linkify_citations(answer: str, context: list[dict]) -> str:
 def _retrieve(search_query: str, limit: int) -> list[dict]:
     candidates = es_service.hybrid_search(
         query=search_query,
-        query_vector=embedding_service.get_embeddings(search_query),
+        query_vector=embedding_service.get_query_embeddings(search_query),
         limit=max(limit * 4, 12),
     )
     return _group_by_document(candidates, limit)

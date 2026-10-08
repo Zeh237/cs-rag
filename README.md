@@ -94,13 +94,13 @@ Key variables:
 | `NOTES_DIR` | The directory that contains the notes | `./csc_notes` |
 | `LLM_API_BASE` | The base URL of the local LLM | empty |
 | `LLM_MODEL` | The name of the LLM | empty |
-| `EMBEDDING_MODEL` | The sentence-transformer model for embeddings | `BAAI/bge-small-en-v1.5` |
+| `EMBEDDING_MODEL` | The sentence-transformer model for embeddings | `google/embeddinggemma-2` |
 | `REDIS_HOST` | The Redis connection URL | `redis://localhost:6379/` |
 | `REDIS_PASSWORD` | The Redis password | empty |
 | `SECRET_KEY` | The signing key for access tokens | `change-me-in-production` |
 | `DATABASE_URL` | The SQLAlchemy database URL | `sqlite+aiosqlite:///./rag.db` |
 
-The `EMBEDDING_MODEL` must output vectors with 384 dimensions. The mapping `app/services/elasticsearch.py` uses that dimension. Use a model with the same dimension.
+The `EMBEDDING_MODEL` must output vectors with 768 dimensions. The mapping `app/services/elasticsearch.py` uses that dimension. Use a model with the same dimension. The default `google/embeddinggemma-2` loads the text-only encoder setup (270M parameters) and encodes queries with the `SearchQuery` prompt and documents with the `Document` prompt, per the EmbeddingGemma 2 developer guide.
 
 ## Add a document
 

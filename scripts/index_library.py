@@ -208,7 +208,7 @@ def build_actions(
                 "highlight_boxes": chunk.get("highlight_boxes", {}),
                 "source_url": meta.get("url") or "",
                 "local_pdf": bool(pdf_service.has_local_pdf(paper_id)) or bool(meta.get("pdf_path")),
-                "vector_embedding": embedding_service.get_embeddings(chunk["text"]),
+                "vector_embedding": embedding_service.get_document_embeddings(chunk["text"]),
             }
             if strategy in CHUNK_STRATEGIES:
                 source["span_start"] = chunk["span_start"]
